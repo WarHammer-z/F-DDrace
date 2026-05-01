@@ -403,7 +403,7 @@ public:
 		// Highest rank within each suit
 		int aSuitMaxRank[4] = { 0 };
 		for (const CCard &Card : vHandCards)
-			aSuitMaxRank[Card.m_Suit] = max(aSuitMaxRank[Card.m_Suit], Card.m_Rank);
+			aSuitMaxRank[Card.m_Suit] = maximum(aSuitMaxRank[Card.m_Suit], Card.m_Rank);
 
 		std::sort(vHandCards.begin(), vHandCards.end(), [&](const CCard &a, const CCard &b) {
 			// Trump cards first
@@ -425,12 +425,12 @@ public:
 		});
 	}
 
-	int GetNextPlayer(int CurrentIndex, bool CheckHands = false, bool Prev = false)
+	int GetNextPlayer(int CurrentIndex, bool Prev = false)
 	{
 		for (int i = 0; i < MAX_DURAK_PLAYERS; i++)
 		{
 			int NextIndex = (CurrentIndex + (Prev ? -1 : 1)*(i + 1) + MAX_DURAK_PLAYERS) % MAX_DURAK_PLAYERS;
-			if (m_aSeats[NextIndex].m_Player.m_ClientID != -1 && m_aSeats[NextIndex].m_Player.m_Stake >= 0 && (!CheckHands || m_aSeats[NextIndex].m_Player.m_vHandCards.size()))
+			if (m_aSeats[NextIndex].m_Player.m_ClientID != -1 && m_aSeats[NextIndex].m_Player.m_Stake >= 0)
 				return NextIndex;
 		}
 		return -1;
@@ -711,8 +711,8 @@ public:
 		for (int i = 0; i < MAX_DURAK_ATTACKS; i++)
 		{
 			if (!m_Attacks[i].m_Offense.Valid())
-			{
-				int NewDefender = GetNextPlayer(m_DefenderIndex, true);
+			{	
+				int NewDefender = GetNextPlayer(m_DefenderIndex);
 				if (NewDefender == -1 || (int)m_aSeats[NewDefender].m_Player.m_vHandCards.size() < NumAttacks + 1)
 					return -1;
 
@@ -817,12 +817,17 @@ class CDurak : public CMinigame
 	CDurakGame *GetOrAddGame(int Number);
 
 public:
-	CDurak(CGameContext *pGameServer, int Type);
+	CDurak(CGameContext *pGameServer);
 	virtual ~CDurak();
 
-	virtual void Tick();
-	virtual void Snap(int SnappingClient);
+	void Tick() override;
+	void Snap(int SnappingClient) override;
 	void PostSnap();
+
+	int SpawnIndex(int ClientID) const override;
+	bool OnCharacterSpawn(class CCharacter *pChr) override;
+	bool OnInput(class CCharacter *pChr, CNetObj_PlayerInput *pNewInput) override;
+	void OnPlayerLeave(int ClientID, bool Disconnect = false, bool Shutdown = false) override;
 
 	void AddMapTableTile(int Number, vec2 Pos);
 	void AddMapSeatTile(int Number, int MapIndex, int SeatIndex);
@@ -836,10 +841,7 @@ public:
 	bool OnDropMoney(int ClientID, int Amount, bool OnDeath);
 	bool OnRainbowName(int ClientID, int MapID);
 	void OnCharacterSeat(int ClientID, int Number, int SeatIndex);
-	void OnCharacterSpawn(class CCharacter *pChr);
 	bool TryEnterBetStake(int ClientID, const char *pMessage);
-	void OnInput(class CCharacter *pChr, CNetObj_PlayerInput *pNewInput);
-	void OnPlayerLeave(int ClientID, bool Disconnect = false, bool Shutdown = false);
 	bool OnSetSpectator(int ClientID, int SpectatorID);
 	bool IsPlayerOnSeat(int ClientID);
 };

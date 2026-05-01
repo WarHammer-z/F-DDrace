@@ -14,6 +14,9 @@ from DDNet++ by ChillerDragon, DDNet, and other community projects, aswell as ma
 If you want to check out the code or contribute, feel free to check out F-DDrace on GitHub:
 == 
 
+English translation by the developers
+== 
+
 For more info, say '/cmdlist' or '/credits'
 == 
 
@@ -795,6 +798,12 @@ You are now in no-bonus area mode
 You are no longer in no-bonus area mode
 == 
 
+You are now in a safe area
+== 
+
+You are no longer in a safe area
+== 
+
 You were arrested for %d seconds
 == 
 
@@ -813,6 +822,15 @@ Please enter the name for this preset into the chat
 Please enter the name of the wanted preset into the chat
 == 
 
+Please enter the tile index into the chat (0-255)
+== 
+
+Entering index aborted
+== 
+
+The entered value is not a valid number
+== 
+
 Couldn't save preset '%s', a preset with that name already exists
 == 
 
@@ -829,6 +847,15 @@ Preset saving aborted
 == 
 
 Preset loading aborted
+== 
+
+'%s' has been arrested for using a suspicious client (%d seconds arrest)
+== 
+
+You were arrested for %d seconds for using a suspicious client. Try using official DDNet client or disable dummy hammerfly.
+== 
+
+'%s' has been arrested for using a VPN (%d seconds arrest)
 == 
 
 Vote aborted
@@ -981,6 +1008,9 @@ Local chat mode has been disabled, automatically entered public chat
 Automatic wallet to bank due to bank disabling
 == 
 
+Players are not allowed to chat from VPNs at this time
+== 
+
 You are not permitted to talk for the next %d seconds.
 == 
 
@@ -991,6 +1021,12 @@ Listing all players:
 == 
 
 You can only vote after logging in.
+== 
+
+You are not allowed to vote because we're currently checking for VPNs. Try again in ~30 seconds.
+== 
+
+You are not allowed to vote because you appear to be using a VPN. Try connecting without a VPN or contacting an admin if you think this is a mistake.
 == 
 
 Wait for current vote to end before calling a new one.
@@ -1083,7 +1119,7 @@ Say '/leave' to join the normal area again
 Type '/1vs1 <playername>' to start a fight with someone
 == 
 
-For custom scorelimits or a kill-border use '/1vs1 <playername> <scorelimit> <killborder>'
+For a stake, custom scorelimits or a kill-border use '/1vs1 <playername> <stake> <scorelimit> <killborder>'
 == 
 
 You have to leave first in order to join another minigame
@@ -1231,6 +1267,27 @@ You will no longer see money broadcasts, jail and escape timer will be shown in 
 == 
 
 You will now see all broadcasts again
+== 
+
+AntiPing enabled (only for 'cl_antiping 1', may cause unwanted side-effects)
+== 
+
+AntiPing disabled
+== 
+
+High Bandwidth mode enabled (full 50 snapshots instead of 25 per second)
+== 
+
+High Bandwidth mode disabled
+== 
+
+Saving player sessions is currently disabled by an admin
+== 
+
+Saving player session on disconnect enabled
+== 
+
+Saving player session on disconnect disabled
 == 
 
 Weapon indicator enabled
@@ -1414,6 +1471,15 @@ Hide Broadcasts
 Local Chat
 == 
 
+AntiPing weapons (only for 'cl_antiping 1')
+== 
+
+High Bandwidth mode
+== 
+
+Save player session
+== 
+
 {vote-header}
 Vᴏᴛᴇs
 == 
@@ -1481,6 +1547,10 @@ Sᴄᴏʀᴇ Mᴏᴅᴇ
 == 
 
 {vote-header}
+Tᴇᴄʜɴɪᴄᴀʟ
+== 
+
+{vote-header}
 Aᴠᴀɪʟᴀʙʟᴇ Lᴀɴɢᴜᴀɢᴇs
 == 
 
@@ -1538,6 +1608,12 @@ You can't hook others
 You can hook others
 == 
 
+[WARNING] Place this tile from switch layer
+== 
+
+[WARNING] Empty toggle mask tile. Place one of the following tiles from game/front layer too: 
+== 
+
 You got +1 jump and can jump %d times now
 == 
 
@@ -1563,6 +1639,9 @@ Happy birthday! :) You have jetpack for 45 seconds
 == 
 
 Sorry, someting is missing to get the gift.
+== 
+
+Humans limit reached.
 == 
 
 Your team was unlocked by an unlock team tile
@@ -1691,6 +1770,15 @@ You can jump 1 time
 You can jump %d times
 == 
 
+Congratulations, you got the immunity flag.
+== 
+
+The blue flag defends against infection.
+== 
+
+You can drop it by pressing F3.
+== 
+
 Taser shield has been used, -5%%, new current: %d%%
 == 
 
@@ -1811,16 +1899,19 @@ You will have rifle if you respawn. For more information about spawn weapons, pl
 It will make your jetpack gun be a ninja. Toggle it using '/ninjajetpack'.
 == 
 
-Taser is a rifle that freezes a player. For more information about the taser and your taser stats, plase visit '/taser'.
+Taser is a rifle that freezes a player. For more information about the taser and your taser stats, please visit '/taser'.
 == 
 
-Taser battery is required to use the taser. Maximum amount of ammo is 100. Plase visit '/taser'.
+Taser battery is required to use the taser. Maximum amount of ammo is 100. Please visit '/taser'.
 == 
 
 With Portal Rifle you can create two portals where your cursor is, then teleport between them.
 == 
 
 Create portal blockers hammer and this ammo with your cursor. See '/portal' for your current amount. How it works: '/helptoggle'
+== 
+
+Using this item you can redirect projectiles by hitting them with your hammer. There is a chance of losing it on death.
 == 
 
 Welcome to the shop, %s! Press F4 to start shopping.
@@ -1949,6 +2040,9 @@ Invalid participant
 Leave the current fight in order to join another one
 == 
 
+Invalid stake, please enter a value between 0 and 10.000.000
+== 
+
 Too many 1vs1 arenas, try again later
 == 
 
@@ -1964,6 +2058,12 @@ You have been invited to a fight by '%s', type '/1vs1 %s' to join
 Join the 1vs1 lobby using '/1vs1' before you accept the fight
 == 
 
+This fight requires a stake of %lld money. Accept by typing '/1vs1 %s %lld'
+== 
+
+Fight cancelled, someone couldn't pay the stake.
+== 
+
 You have accepted the invite by '%s'
 == 
 
@@ -1971,6 +2071,9 @@ You have accepted the invite by '%s'
 == 
 
 '%s' won a 1vs1 round against '%s'! Final scores: %d - %d
+== 
+
+You won this 1vs1 round! Your earnings: +%lld money.
 == 
 
 '%s' left a 1vs1 round against '%s'! Current scores: %d - %d

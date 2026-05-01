@@ -5,8 +5,8 @@
 
 #include "alloc.h"
 
-#include "entities/pickup_drop.h"
-#include "entities/portal.h"
+#include "entities/interactive/pickup_drop.h"
+#include "entities/weapons/portal.h"
 #include <vector>
 
 #include "teeinfo.h"
@@ -198,6 +198,7 @@ public:
 	int64 m_Last_KickVote;
 	bool m_ShowOthers;
 	bool m_ShowAll;
+	bool m_EnableSpectatorCount;
 	vec2 m_ShowDistance;
 	bool m_SpecTeam;
 	bool m_NinjaJetpack;
@@ -302,6 +303,8 @@ public:
 	int m_InfMeteors;
 	bool m_HasSpookyGhost;
 
+	bool m_HasProjectileHammer;
+
 	CPortal *m_pPortal[NUM_PORTALS];
 	int64 m_ConfettiWinEffectTick;
 
@@ -327,6 +330,7 @@ public:
 	bool IsExpiredItem(int Item);
 	void ExpireItems();
 
+	bool BankOrWalletTransaction(int Amount, const char *pDescription);
 	void BankCurrTransaction(float Amount, const char* pDescription);
 	bool BankTransaction(int Amount, const char *pDescription = "");
 	bool WalletTransaction(int Amount, const char *pDescription = "");
@@ -400,6 +404,9 @@ public:
 	bool m_HideFromSpecCount;
 	char m_aDelayedJoinMsg[128];
 
+	bool m_GotImmunityFlagMessage;
+	int64 m_LastHumanTryTick;
+
 	// Language
 	const char *Localize(const char *pText, const char *pContext = ""); // Never change this function name
 	void SetLanguage(int Language, bool Silent = false, bool UpdateDummy = true);
@@ -439,6 +446,7 @@ public:
 	bool m_aMuted[MAX_CLIENTS];
 
 	bool m_BotDetected;
+	bool m_ProcessedDnsblJail;
 
 	// ddrace hud
 	bool ShowDDraceHud();
@@ -476,8 +484,6 @@ public:
 
 	bool IsMinigame();
 	int m_Minigame;
-	int m_SurvivalState;
-	int m_SurvivalDieTick;
 
 	// minigame join/leave request
 	bool MinigameRequestTick();
@@ -496,6 +502,10 @@ public:
 	// shutdown tee
 	bool m_CheckedSavePlayer;
 	bool m_LoadedSavedPlayer;
+
+	// save disconnect
+	bool m_SavePlayerDisconnect;
+	void SetSavePlayerDisconnect(bool Set);
 
 	// redirect tile
 	int64 m_LastRedirectTryTick;
@@ -516,8 +526,15 @@ public:
 	int64 m_VoteQuestionEndTick;
 	int64 m_LastVoteStatusUpdateTick;
 
+	// AntiPing
+	void SetAntiPing(bool Set, bool Silent = false);
+	bool AntiPing() { return m_AntiPing; }
+
+	void SetHighBandwidth(bool Value, bool Silent = false);
+
 private:
 	int64 m_WalletMoney;
+	bool m_AntiPing;
 };
 
 #endif

@@ -37,7 +37,7 @@ GameInfoFlags = Flags("GAMEINFOFLAG", [
 ])
 GameInfoFlags2 = Flags("GAMEINFOFLAG2", [
 	"ALLOW_X_SKINS", "GAMETYPE_CITY", "GAMETYPE_FDDRACE", "ENTITIES_FDDRACE", "HUD_HEALTH_ARMOR", "HUD_AMMO",
-	"HUD_DDRACE", "NO_WEAK_HOOK_AND_BOUNCE"
+	"HUD_DDRACE", "NO_WEAK_HOOK_AND_BOUNCE", "NO_SKIN_CHANGE_FOR_FROZEN", "DDRACE_TEAM", "PREDICT_EVENTS"
 ])
 CharacterFlags = Flags("CHARACTERFLAG", ["SOLO", "JETPACK", "NO_COLLISION", "ENDLESS_HOOK", "ENDLESS_JUMP", "SUPER",
                   "NO_HAMMER_HIT", "NO_SHOTGUN_HIT", "NO_GRENADE_HIT", "NO_LASER_HIT", "NO_HOOK",
@@ -46,12 +46,26 @@ CharacterFlags = Flags("CHARACTERFLAG", ["SOLO", "JETPACK", "NO_COLLISION", "END
 				  "NO_MOVEMENTS", "IN_FREEZE", "PRACTICE_MODE", "LOCK_MODE", "TEAM0_MODE", "INVINCIBLE"])
 
 EntityClasses = Enum("ENTITYCLASS", ["PROJECTILE", "DOOR", "DRAGGER_WEAK", "DRAGGER_NORMAL", "DRAGGER_STRONG", "GUN_NORMAL", "GUN_EXPLOSIVE", "GUN_FREEZE", "GUN_UNFREEZE", "LIGHT", "PICKUP"])
-LaserTypes = Enum("LASERTYPE", ["RIFLE", "SHOTGUN", "DOOR", "FREEZE"])
 
-ProjectileFlags = Flags("PROJECTILEFLAG", ["CLIENTID_BIT{}".format(i) for i in range(8)] + [
+LegacyProjectileFlags = Flags("LEGACYPROJECTILEFLAG", ["CLIENTID_BIT{}".format(i) for i in range(8)] + [
 	"NO_OWNER", "IS_DDNET", "BOUNCE_HORIZONTAL", "BOUNCE_VERTICAL",
 	"EXPLOSIVE", "FREEZE",
 ])
+
+ProjectileFlags = Flags("PROJECTILEFLAG", [
+	"BOUNCE_HORIZONTAL", "BOUNCE_VERTICAL", "EXPLOSIVE", "FREEZE", "NORMALIZE_VEL",
+])
+LaserFlags = Flags("LASERFLAG", [
+	"NO_PREDICT",
+])
+
+PickupFlags = Flags("PICKUPFLAG", [
+	"XFLIP", "YFLIP", "ROTATE", "NO_PREDICT",
+])
+
+LaserTypes = Enum("LASERTYPE", ["RIFLE", "SHOTGUN", "DOOR", "FREEZE", "DRAGGER", "GUN", "PLASMA"])
+DraggerTypes = Enum("LASERDRAGGERTYPE", ["WEAK", "WEAK_NW", "NORMAL", "NORMAL_NW", "STRONG", "STRONG_NW"])
+GunTypes = Enum("LASERGUNTYPE", ["UNFREEZE", "EXPLOSIVE", "FREEZE", "EXPFREEZE"])
 
 
 RawHeader = '''
@@ -92,7 +106,7 @@ enum
 
 enum
 {
-	GAMEINFO_CURVERSION=8,
+	GAMEINFO_CURVERSION=11,
 };
 '''
 
@@ -112,6 +126,8 @@ Enums = [
 	Authed,
 	EntityClasses,
 	LaserTypes,
+	DraggerTypes,
+	GunTypes,
 ]
 
 Flags = [
@@ -124,7 +140,10 @@ Flags = [
 	GameInfoFlags,
 	GameInfoFlags2,
 	CharacterFlags,
+	LegacyProjectileFlags,
 	ProjectileFlags,
+	LaserFlags,
+	PickupFlags,
 ]
 
 Objects = [
@@ -294,6 +313,7 @@ Objects = [
 		# New data fields for improved target accuracy
 		NetIntAny("m_TargetX"),
 		NetIntAny("m_TargetY"),
+		NetIntRange("m_TuneZoneOverride", 'TuneZone::OVERRIDE_NONE', 'TuneZone::NUM-1', default='TuneZone::OVERRIDE_NONE'),
 	], fixup=False),
 
 	NetObjectEx("GameInfoEx", "gameinfo@netobj.ddnet.tw", [
@@ -304,7 +324,7 @@ Objects = [
 
 	# The code assumes that this has the same in-memory representation as
 	# the Projectile net object.
-	NetObjectEx("DDNetProjectile", "projectile@netobj.ddnet.tw", [
+	NetObjectEx("DDRaceProjectile", "projectile@netobj.ddnet.tw", [
 		NetIntAny("m_X"),
 		NetIntAny("m_Y"),
 		NetIntAny("m_Angle"),
@@ -321,6 +341,31 @@ Objects = [
 		NetTick("m_StartTick"),
 		NetIntRange("m_Owner", -1, 'MAX_CLIENTS-1'),
 		NetIntAny("m_Type"),
+		NetIntAny("m_SwitchNumber", default=-1),
+		NetIntAny("m_Subtype", default=-1),
+		NetIntAny("m_Flags", default=0),
+	]),
+
+	NetObjectEx("DDNetProjectile", "ddnet-projectile@netobj.ddnet.tw", [
+		NetIntAny("m_X"),
+		NetIntAny("m_Y"),
+		NetIntAny("m_VelX"),
+		NetIntAny("m_VelY"),
+		NetIntRange("m_Type", 0, 'NUM_WEAPONS-1'),
+		NetTick("m_StartTick"),
+		NetIntRange("m_Owner", -1, 'MAX_CLIENTS-1'),
+		NetIntAny("m_SwitchNumber"),
+		NetIntAny("m_TuneZone"),
+		NetIntAny("m_Flags"),
+	]),
+
+	NetObjectEx("DDNetPickup", "pickup@netobj.ddnet.tw", [
+		NetIntAny("m_X"),
+		NetIntAny("m_Y"),
+		NetIntRange("m_Type", 0, 'max_int'),
+		NetIntRange("m_Subtype", 0, 'max_int'),
+		NetIntAny("m_SwitchNumber"),
+		NetIntAny("m_Flags", default=0),
 	]),
 
 	## Events
@@ -399,6 +444,10 @@ Objects = [
 		NetIntRange("m_Deadzone", 0, 'max_int'),
 		NetIntRange("m_FollowFactor", 0, 'max_int'),
 		NetIntRange("m_SpectatorCount", 0, 'MAX_CLIENTS-1'),
+	]),
+
+	NetObjectEx("SpectatorCount", "spectator-count@netobj.ddnet.org", [
+		NetIntRange("m_NumSpectators", 0, 'max_int'),
 	]),
 ]
 
@@ -650,5 +699,38 @@ Messages = [
 
 	NetMessageEx("Sv_CommandInfoRemoveEx", "commandinfo-remove@netmsg.ddnet.org", [
 			NetStringStrict("m_pName")
+	]),
+
+	NetMessageEx("Cl_EnableSpectatorCount", "enable-spectator-count@netmsg.ddnet.org", [
+		NetBool("m_Enable"),
+	]),
+
+	NetMessageEx("Sv_PreInput", "preinput@netmsg.ddnet.org", [
+		NetIntAny("m_Direction"),
+		NetIntAny("m_TargetX"),
+		NetIntAny("m_TargetY"),
+
+		NetIntAny("m_Jump"),
+		NetIntAny("m_Fire"),
+		NetIntAny("m_Hook"),
+		
+		NetIntAny("m_WantedWeapon"),
+		NetIntAny("m_NextWeapon"),
+		NetIntAny("m_PrevWeapon"),
+
+		NetIntRange("m_Owner", 0, 'MAX_CLIENTS-1'),
+		NetTick("m_IntendedTick"),
+	]),
+
+	NetMessageEx("Sv_ServerAlert", "server-alert@netmsg.ddnet.org", [
+		NetString("m_pMessage"),
+	]),
+
+	NetMessageEx("Sv_ModeratorAlert", "moderator-alert@netmsg.ddnet.org", [
+		NetString("m_pMessage"),
+	]),
+
+	NetMessageEx("Sv_ChangeInfoCooldown", "change-info-cooldown@netmsg.ddnet.org", [
+		NetTick("m_WaitUntil")
 	]),
 ]

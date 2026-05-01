@@ -1,6 +1,5 @@
-#
-# Author: claude.ai & fokkonaut
-#
+English translation by the developers
+== Traduction française de l'IA
 
 /cmdlist will show a list of all chat commands
 == /cmdlist affichera une liste de toutes les commandes de chat
@@ -942,8 +941,8 @@ Say '/leave' to join the normal area again
 Type '/1vs1 <playername>' to start a fight with someone
 == Tapez '/1vs1 <nom_du_joueur>' pour commencer un combat avec quelqu'un
 
-For custom scorelimits or a kill-border use '/1vs1 <playername> <scorelimit> <killborder>'
-== Pour des limites de score personnalisées ou une bordure de mort, utilisez '/1vs1 <nom_du_joueur> <limite_de_score> <bordure_de_mort>'
+For a stake, custom scorelimits or a kill-border use '/1vs1 <playername> <stake> <scorelimit> <killborder>'
+== Pour une mise, des limites de score personnalisées ou une bordure de mort, utilisez '/1vs1 <nom_du_joueur> <miser> <limite_de_score> <bordure_de_mort>'
 
 You have to leave first in order to join another minigame
 == Vous devez d'abord quitter pour rejoindre un autre mini-jeu
@@ -1955,10 +1954,10 @@ You will have rifle if you respawn. For more information about spawn weapons, pl
 It will make your jetpack gun be a ninja. Toggle it using '/ninjajetpack'.
 == Cela transformera votre pistolet à jetpack en ninja. Activez-le en utilisant '/ninjajetpack'.
 
-Taser is a rifle that freezes a player. For more information about the taser and your taser stats, plase visit '/taser'.
+Taser is a rifle that freezes a player. For more information about the taser and your taser stats, please visit '/taser'.
 == Le Taser est un fusil qui gèle un joueur. Pour plus d'informations sur le taser et vos statistiques de taser, veuillez visiter '/taser'.
 
-Taser battery is required to use the taser. Maximum amount of ammo is 100. Plase visit '/taser'.
+Taser battery is required to use the taser. Maximum amount of ammo is 100. Please visit '/taser'.
 == Une batterie de Taser est nécessaire pour utiliser le taser. La quantité maximale de munitions est de 100. Veuillez visiter '/taser'.
 
 With Portal Rifle you can create two portals where your cursor is, then teleport between them.
@@ -2090,3 +2089,103 @@ Passed…
 {durak-name}
 Next move: %ds
 == Prochain: %ds
+
+You are now in a safe area
+== 
+
+You are no longer in a safe area
+== 
+
+Please enter the tile index into the chat (0-255)
+== 
+
+Entering index aborted
+== 
+
+The entered value is not a valid number
+== 
+
+'%s' has been arrested for using a suspicious client (%d seconds arrest)
+== 
+
+You were arrested for %d seconds for using a suspicious client. Try using official DDNet client or disable dummy hammerfly.
+== 
+
+'%s' has been arrested for using a VPN (%d seconds arrest)
+== 
+
+Players are not allowed to chat from VPNs at this time
+== 
+
+You are not allowed to vote because we're currently checking for VPNs. Try again in ~30 seconds.
+== 
+
+You are not allowed to vote because you appear to be using a VPN. Try connecting without a VPN or contacting an admin if you think this is a mistake.
+== 
+
+AntiPing enabled (only for 'cl_antiping 1', may cause unwanted side-effects)
+== 
+
+AntiPing disabled
+== 
+
+High Bandwidth mode enabled (full 50 snapshots instead of 25 per second)
+== 
+
+High Bandwidth mode disabled
+== 
+
+Saving player sessions is currently disabled by an admin
+== 
+
+Saving player session on disconnect enabled
+== 
+
+Saving player session on disconnect disabled
+== 
+
+AntiPing weapons (only for 'cl_antiping 1')
+== 
+
+High Bandwidth mode
+== 
+
+Save player session
+== 
+
+{vote-header}
+Tᴇᴄʜɴɪᴄᴀʟ
+== 
+
+[WARNING] Place this tile from switch layer
+== 
+
+[WARNING] Empty toggle mask tile. Place one of the following tiles from game/front layer too: 
+== 
+
+Humans limit reached.
+== 
+
+Congratulations, you got the immunity flag.
+== 
+
+The blue flag defends against infection.
+== 
+
+You can drop it by pressing F3.
+== 
+
+Using this item you can redirect projectiles by hitting them with your hammer. There is a chance of losing it on death.
+== 
+
+Invalid stake, please enter a value between 0 and 10.000.000
+== 
+
+This fight requires a stake of %lld money. Accept by typing '/1vs1 %s %lld'
+== 
+
+Fight cancelled, someone couldn't pay the stake.
+== 
+
+You won this 1vs1 round! Your earnings: +%lld money.
+== 

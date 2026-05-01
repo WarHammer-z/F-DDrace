@@ -55,6 +55,7 @@ enum
 	CANTMOVE_VIP_PLUS_ONLY=1<<13,
 	CANTMOVE_PLOT_DOOR=1<<14,
 	CANTMOVE_DOWN_LASERDOOR=1<<15, // used by prediction
+	CANTMOVE_DOWN_SOLID_DRAWTILE=1<<16, // used by prediction
 };
 
 vec2 ClampVel(int MoveRestriction, vec2 Vel);
@@ -81,30 +82,44 @@ public:
 	~CCollision();
 	void Init(class CLayers* pLayers, class CConfig *pConfig);
 	void FillAntibot(CAntibotMapData *pMapData);
-	bool CheckPoint(float x, float y) { return IsSolid(round_to_int(x), round_to_int(y)); }
-	bool CheckPoint(vec2 Pos) { return CheckPoint(Pos.x, Pos.y); }
+	int CheckPoint(float x, float y) { return IsSolid(round_to_int(x), round_to_int(y)); }
+	int CheckPoint(vec2 Pos) { return CheckPoint(Pos.x, Pos.y); }
 	int GetCollisionAt(float x, float y) { return GetTile(round_to_int(x), round_to_int(y)); }
 	int GetWidth() { return m_Width; };
 	int GetHeight() { return m_Height; };
-	int IntersectLine(vec2 Pos0, vec2 Pos1, vec2* pOutCollision, vec2* pOutBeforeCollision);
-	int IntersectLineTeleWeapon(vec2 Pos0, vec2 Pos1, vec2* pOutCollision, vec2* pOutBeforeCollision, int* pTeleNr);
-	int IntersectLineTeleHook(vec2 Pos0, vec2 Pos1, vec2* pOutCollision, vec2* pOutBeforeCollision, int* pTeleNr);
-	void MovePoint(vec2* pInoutPos, vec2* pInoutVel, float Elasticity, int* pBounces);
 
-	struct MoveRestrictionExtra
+	struct SMoveRestrictionExtra
 	{
 		bool m_RoomKey;
 		bool m_VipPlus;
 
-		MoveRestrictionExtra()
+		SMoveRestrictionExtra()
 		{
 			m_RoomKey = false;
 			m_VipPlus = false;
 		}
 	};
 
-	void MoveBox(CALLBACK_SWITCHACTIVE pfnSwitchActive, void *pUser, vec2 *pInoutPos, vec2 *pInoutVel, vec2 Size, float Elasticity, bool CheckStopper, MoveRestrictionExtra Extra = MoveRestrictionExtra());
-	void MoveBox(vec2 *pInoutPos, vec2 *pInoutVel, vec2 Size, float Elasticity, bool CheckStopper, MoveRestrictionExtra Extra = MoveRestrictionExtra())
+	class CTeleWeaponInfo
+	{
+	public:
+		bool m_IsTeleWeapon;
+		int m_Team;
+		SMoveRestrictionExtra m_MoveRestrictionExtra;
+		CTeleWeaponInfo() : m_IsTeleWeapon(false), m_Team(0) {}
+		CTeleWeaponInfo(bool IsTeleWeapon, int Team, const SMoveRestrictionExtra &Extra)
+			: m_IsTeleWeapon(IsTeleWeapon), m_Team(Team), m_MoveRestrictionExtra(Extra) {}
+	};
+
+	int IntersectTeleProjLaser(vec2 Pos, const CTeleWeaponInfo &TeleWeaponInfo);
+
+	int IntersectLine(vec2 Pos0, vec2 Pos1, vec2* pOutCollision, vec2* pOutBeforeCollision, const CTeleWeaponInfo &TeleWeaponInfo = CTeleWeaponInfo());
+	int IntersectLineTeleWeapon(vec2 Pos0, vec2 Pos1, vec2* pOutCollision, vec2* pOutBeforeCollision, int* pTeleNr, const CTeleWeaponInfo &TeleWeaponInfo = CTeleWeaponInfo());
+	int IntersectLineTeleHook(vec2 Pos0, vec2 Pos1, vec2* pOutCollision, vec2* pOutBeforeCollision, int* pTeleNr);
+	void MovePoint(vec2* pInoutPos, vec2* pInoutVel, float Elasticity, int* pBounces);
+
+	void MoveBox(CALLBACK_SWITCHACTIVE pfnSwitchActive, void *pUser, vec2 *pInoutPos, vec2 *pInoutVel, vec2 Size, vec2 Elasticity, bool CheckStopper, SMoveRestrictionExtra Extra = SMoveRestrictionExtra(), bool *pGrounded = nullptr);
+	void MoveBox(vec2 *pInoutPos, vec2 *pInoutVel, vec2 Size, vec2 Elasticity, bool CheckStopper, SMoveRestrictionExtra Extra = SMoveRestrictionExtra())
 	{
 		MoveBox(0, 0, pInoutPos, pInoutVel, Size, Elasticity, CheckStopper, Extra);
 	}
@@ -113,7 +128,9 @@ public:
 	// DDRace
 
 	void Dest();
+	void SetTuneCollisionAt(float x, float y, int id, int Number);
 	void SetCollisionAt(float x, float y, int id);
+	void SetFCollisionAt(float x, float y, int id);
 	int GetFCollisionAt(float x, float y) { return GetFTile(round_to_int(x), round_to_int(y)); }
 	int IntersectNoLaser(vec2 Pos0, vec2 Pos1, vec2* pOutCollision, vec2* pOutBeforeCollision, int Number = -1);
 	int IntersectNoLaserNW(vec2 Pos0, vec2 Pos1, vec2* pOutCollision, vec2* pOutBeforeCollision);
@@ -122,8 +139,8 @@ public:
 	int GetIndex(vec2 PrevPos, vec2 Pos);
 	int GetFIndex(int x, int y);
 
-	int GetMoveRestrictions(CALLBACK_SWITCHACTIVE pfnSwitchActive, void *pUser, vec2 Pos, float Distance = 18.0f, int OverrideCenterTileIndex = -1, MoveRestrictionExtra Extra = MoveRestrictionExtra());
-	int GetMoveRestrictions(vec2 Pos, float Distance = 18.0f, MoveRestrictionExtra Extra = MoveRestrictionExtra())
+	int GetMoveRestrictions(CALLBACK_SWITCHACTIVE pfnSwitchActive, void *pUser, vec2 Pos, float Distance = 18.0f, int OverrideCenterTileIndex = -1, SMoveRestrictionExtra Extra = SMoveRestrictionExtra());
+	int GetMoveRestrictions(vec2 Pos, float Distance = 18.0f, SMoveRestrictionExtra Extra = SMoveRestrictionExtra())
 	{
 		return GetMoveRestrictions(0, 0, Pos, Distance, -1, Extra);
 	}
@@ -149,10 +166,10 @@ public:
 	int IsTeleportWeapon(int Index);
 	int IsTeleportHook(int Index);
 	int IsTCheckpoint(int Index);
-	int IsSpeedup(int Index);
+	bool IsSpeedup(int Index);
 	int IsTune(int Index);
 	int IsTuneLock(int Index) const;
-	void GetSpeedup(int Index, vec2* Dir, int* Force, int* MaxSpeed);
+	void GetSpeedup(int Index, vec2* Dir, int* Force, int* MaxSpeed, int *pType);
 	int IsSwitch(int Index);
 	int GetSwitchNumber(int Index);
 	int GetSwitchDelay(int Index);
@@ -194,6 +211,7 @@ public:
 	int IntersectLineFlagPickup(vec2 Pos0, vec2 Pos1, vec2* pOutCollision, vec2* pOutBeforeCollision);
 	int IntersectLinePortalRifleStop(vec2 Pos0, vec2 Pos1, vec2* pOutCollision, vec2* pOutBeforeCollision);
 	int IntersectLineNoBonus(vec2 Pos0, vec2 Pos1, vec2* pOutCollision, vec2* pOutBeforeCollision, bool Enter);
+	int IntersectLineSafeArea(vec2 Pos0, vec2 Pos1, vec2* pOutCollision, vec2* pOutBeforeCollision, bool Enter);
 
 	// redirect tiles
 	struct SRedirectTile
@@ -253,11 +271,11 @@ public:
 	// Boxbig
 	const float ms_MinStaticPhysSize = 30; // actually the smallest object right now is a map tile (32 x 32)
 	bool TestBoxBig(vec2 Pos, vec2 Size);
-	void MoveBoxBig(vec2 *pInoutPos, vec2 *pInoutVel, vec2 Size, float Elasticity);
+	void MoveBoxBig(vec2 *pInoutPos, vec2 *pInoutVel, vec2 Size, vec2 Elasticity);
 	bool IsBoxGrounded(vec2 Pos, vec2 Size);
 
 	// speedups
-	void SetSpeedup(vec2 Pos, int Angle, int Force, int MaxSpeed);
+	void SetSpeedup(vec2 Pos, int Angle, int Force, int MaxSpeed, int Type = TILE_SPEED_BOOST);
 
 	// teleporters
 	int m_NumTeleporters;

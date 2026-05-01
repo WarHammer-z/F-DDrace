@@ -92,6 +92,9 @@ CHAT_COMMAND("language", "?s[lang-code]", CFGFLAG_CHAT, ConLanguage, this, "Chan
 CHAT_COMMAND("discord", "", CFGFLAG_CHAT, ConDiscord, this, "Sends Discord invite link", AUTHED_NO)
 CHAT_COMMAND("shrug", "", CFGFLAG_CHAT, ConShrug, this, "¯\\_(ツ)_/¯", AUTHED_NO)
 CHAT_COMMAND("hidebroadcasts", "?i['0'|'1']", CFGFLAG_CHAT, ConHideBroadcasts, this, "Whether to hide money, jail, escape broadcasts and show them in vote menu instead", AUTHED_NO)
+CHAT_COMMAND("antiping", "?i['0'|'1']", CFGFLAG_CHAT, ConAntiPing, this, "Whether the server will try aggressively to predict custom features such as weapons (may cause unwanted side-effects)", AUTHED_NO)
+CHAT_COMMAND("highbandwidth", "?i['0'|'1']", CFGFLAG_CHAT, ConHighBandwidth, this, "Whether the bandwidth will be doubled (50 instead of 25 snapshots per second)", AUTHED_NO)
+CHAT_COMMAND("savesession", "?i['0'|'1']", CFGFLAG_CHAT, ConSaveSession, this, "Whether the current player session will be saved on disconnect to load it again", AUTHED_NO)
 
 //minigames
 CHAT_COMMAND("minigames", "", CFGFLAG_CHAT, ConMinigames, this, "Shows a list of all available minigames", AUTHED_NO)
@@ -100,7 +103,7 @@ CHAT_COMMAND("block", "", CFGFLAG_CHAT, ConJoinBlock, this, "Joins the block min
 CHAT_COMMAND("survival", "", CFGFLAG_CHAT, ConJoinSurvival, this, "Joins the survival minigame", AUTHED_NO)
 CHAT_COMMAND("boomfng", "", CFGFLAG_CHAT, ConJoinBoomFNG, this, "Joins the boom fng minigame", AUTHED_NO)
 CHAT_COMMAND("fng", "", CFGFLAG_CHAT, ConJoinFNG, this, "Joins the fng minigame", AUTHED_NO)
-CHAT_COMMAND("1vs1", "?s[playername] ?i[scorelimit] ?i[killborder]", CFGFLAG_CHAT, Con1VS1, this, "Joins the 1vs1 minigame or accepts/creates a fight/new arena", AUTHED_NO)
+CHAT_COMMAND("1vs1", "?s[playername] ?i[stake] ?i[scorelimit] ?i[killborder]", CFGFLAG_CHAT, Con1VS1, this, "Joins the 1vs1 minigame or accepts/creates a fight/new arena", AUTHED_NO)
 CHAT_COMMAND("durak", "", CFGFLAG_CHAT, ConJoinDurak, this, "Joins the durak minigame", AUTHED_NO)
 
 //account top5s

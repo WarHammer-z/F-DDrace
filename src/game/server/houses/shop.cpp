@@ -32,23 +32,24 @@ CShop::CShop(CGameContext *pGameServer, int Type) : CHouse(pGameServer, Type)
 		AddItem("Spawn Grenade", 33, 600000, TIME_FOREVER, Localizable("You will have grenade if you respawn. For more information about spawn weapons, please type '/spawnweapons'."));
 		AddItem("Spawn Rifle", 33, 600000, TIME_FOREVER, Localizable("You will have rifle if you respawn. For more information about spawn weapons, please type '/spawnweapons'."));
 		AddItem("Ninjajetpack", 21, 10000, TIME_FOREVER, Localizable("It will make your jetpack gun be a ninja. Toggle it using '/ninjajetpack'."));
-		AddItem("Taser", 30, -1, TIME_FOREVER, Localizable("Taser is a rifle that freezes a player. For more information about the taser and your taser stats, plase visit '/taser'."));
-		AddItem("Taser battery", 30, 100000, TIME_FOREVER, Localizable("Taser battery is required to use the taser. Maximum amount of ammo is 100. Plase visit '/taser'."), false, 10);
-		AddItem("Portal Rifle", EuroMode ? 1 : 45, EuroMode ? 10 : 500000, TIME_20_DAYS, Localizable("With Portal Rifle you can create two portals where your cursor is, then teleport between them."), EuroMode);
-		AddItem("Portal Blocker", 20, 10000, TIME_FOREVER, Localizable("Create portal blockers hammer and this ammo with your cursor. See '/portal' for your current amount. How it works: '/helptoggle'"), false, 10);
+		AddItem("Taser", 30, -1, TIME_FOREVER, Localizable("Taser is a rifle that freezes a player. For more information about the taser and your taser stats, please visit '/taser'."));
+		AddItem("Taser battery", 30, 100000, TIME_FOREVER, Localizable("Taser battery is required to use the taser. Maximum amount of ammo is 100. Please visit '/taser'."), false, 10);
+		AddItem("Portal Rifle", EuroMode ? 1 : 45, EuroMode ? 10 : 1000000, TIME_20_DAYS, Localizable("With Portal Rifle you can create two portals where your cursor is, then teleport between them."), EuroMode);
+		AddItem("Portal Blocker", 15, 7500, TIME_FOREVER, Localizable("Create portal blockers hammer and this ammo with your cursor. See '/portal' for your current amount. How it works: '/helptoggle'"), false, 10);
+		AddItem("Projectile Hammer", 1, 10000, TIME_DISCONNECT, Localizable("Using this item you can redirect projectiles by hitting them with your hammer. There is a chance of losing it on death."));
 
 		static char aaBuf[NUM_POLICE_LEVELS][32];
 		for (int i = 0; i < NUM_POLICE_LEVELS; i++)
 		{
 			str_format(aaBuf[i], sizeof(aaBuf[i]), "Police Rank %d", i+1);
-			AddItem(aaBuf[i], GameServer()->m_aPoliceLevel[i], m_aItems[ITEM_POLICE].m_Price, m_aItems[ITEM_POLICE].m_Time, m_aItems[ITEM_POLICE].m_pDescription);
+			AddItem(aaBuf[i], GameServer()->m_Accounts.m_aPoliceLevel[i], m_aItems[ITEM_POLICE].m_Price, m_aItems[ITEM_POLICE].m_Time, m_aItems[ITEM_POLICE].m_pDescription);
 		}
 
 		static char aaBuf2[NUM_TASER_LEVELS][32];
 		for (int i = 0; i < NUM_TASER_LEVELS; i++)
 		{
 			str_format(aaBuf2[i], sizeof(aaBuf2[i]), "Taser Level %d", i+1);
-			AddItem(aaBuf2[i], m_aItems[ITEM_TASER].m_Level, GameServer()->m_aTaserPrice[i], m_aItems[ITEM_TASER].m_Time, m_aItems[ITEM_TASER].m_pDescription);
+			AddItem(aaBuf2[i], m_aItems[ITEM_TASER].m_Level, GameServer()->m_Accounts.m_aTaserPrice[i], m_aItems[ITEM_TASER].m_Time, m_aItems[ITEM_TASER].m_pDescription);
 		}
 	}
 	else if (IsType(HOUSE_PLOT_SHOP))
@@ -61,7 +62,7 @@ CShop::CShop(CGameContext *pGameServer, int Type) : CHouse(pGameServer, Type)
 		int Time;
 		for (int i = PLOT_START; i < m_NumItems; i++)
 		{
-			Size = GameServer()->m_aPlots[i].m_Size;
+			Size = GameServer()->m_Plots.GetSize(i);
 			str_format(aaName[i], sizeof(aaName[i]), "Plot %d", i);
 			Level = (Size + 1) * 20;
 			Price = (Size + 1) * 50000;
@@ -166,38 +167,38 @@ void CShop::OnPageChange(int ClientID)
 	{
 		if (m_aClients[ClientID].m_Page == ITEM_POLICE)
 		{
-			CGameContext::AccountInfo *pAccount = &GameServer()->m_Accounts[GameServer()->m_apPlayers[ClientID]->GetAccID()];
+			CAccounts::AccountInfo *pAccount = &GameServer()->m_Accounts.Get(GameServer()->m_apPlayers[ClientID]->GetAccID());
 			m_aBackgroundItem[ClientID] = clamp(POLICE_RANK_1 + pAccount->m_PoliceLevel, (int)POLICE_RANK_1, (int)POLICE_RANK_5);
 		}
 		else if (m_aClients[ClientID].m_Page == ITEM_TASER)
 		{
-			CGameContext::AccountInfo *pAccount = &GameServer()->m_Accounts[GameServer()->m_apPlayers[ClientID]->GetAccID()];
+			CAccounts::AccountInfo *pAccount = &GameServer()->m_Accounts.Get(GameServer()->m_apPlayers[ClientID]->GetAccID());
 			m_aBackgroundItem[ClientID] = clamp(TASER_LEVEL_1 + pAccount->m_TaserLevel, (int)TASER_LEVEL_1, (int)TASER_LEVEL_10);
 		}
 	}
 
 	// send page
 	int Item = m_aBackgroundItem[ClientID];
-	char aMsg[512];
+	char aMsg[1024];
 	if (m_aClients[ClientID].m_Page <= PAGE_MAIN)
 	{
 		str_copy(aMsg, GameServer()->m_apPlayers[ClientID]->Localize("Welcome to the shop!\n\nBy shooting to the right you go one site forward, and by shooting left you go one site back."), sizeof(aMsg));
 	}
 	else
 	{
-		char aDescription[256];
+		char aDescription[512];
 		if (IsType(HOUSE_SHOP))
 			str_copy(aDescription, GameServer()->m_apPlayers[ClientID]->Localize(m_aItems[Item].m_pDescription), sizeof(aDescription));
 		else if (IsType(HOUSE_PLOT_SHOP))
 		{
 			char aOwner[32];
 			char aRented[64];
-			bool Owned = GameServer()->m_aPlots[Item].m_aOwner[0] != 0;
+			bool Owned = GameServer()->m_Plots.GetOwner(Item)[0] != 0;
 
 			if (Owned)
 			{
-				str_format(aOwner, sizeof(aOwner), "'%s'", GameServer()->m_aPlots[Item].m_aDisplayName);
-				str_format(aRented, sizeof(aRented), "%s: %s", GameServer()->m_apPlayers[ClientID]->Localize("Rented until"), GameServer()->GetDate(GameServer()->m_aPlots[Item].m_ExpireDate));
+				str_format(aOwner, sizeof(aOwner), "'%s'", GameServer()->m_Plots.GetDisplayName(Item));
+				str_format(aRented, sizeof(aRented), "%s: %s", GameServer()->m_apPlayers[ClientID]->Localize("Rented until"), GameServer()->m_Plots.GetPlotExpireDate(Item));
 			}
 			else
 			{
@@ -210,8 +211,8 @@ void CShop::OnPageChange(int ClientID)
 				"Max. objects: %d\n"
 				"Owner: %s\n"
 				"%s",
-				GameServer()->GetPlotSizeString(Item),
-				GameServer()->GetMaxPlotObjects(Item),
+				GameServer()->m_Plots.GetPlotSizeString(Item),
+				GameServer()->m_Plots.GetMaxPlotObjects(Item),
 				aOwner, aRented);
 		}
 
@@ -264,7 +265,7 @@ void CShop::BuyItem(int ClientID, int Item)
 	}
 
 	CCharacter *pChr = GameServer()->GetPlayerChar(ClientID);
-	CGameContext::AccountInfo *pAccount = &GameServer()->m_Accounts[pPlayer->GetAccID()];
+	CAccounts::AccountInfo *pAccount = &GameServer()->m_Accounts.Get(pPlayer->GetAccID());
 
 	char aMsg[128];
 	int ItemID = Item;
@@ -292,6 +293,7 @@ void CShop::BuyItem(int ClientID, int Item)
 			|| (Item == ITEM_TASER				&& pAccount->m_TaserLevel >= NUM_TASER_LEVELS)
 			|| (Item == ITEM_TASER_BATTERY && pAccount->m_TaserBattery >= MAX_TASER_BATTERY)
 			//|| (Item == ITEM_PORTAL_RIFLE		&& pAccount->m_PortalRifle) // portal rifle can be bought unlimited times
+			|| (Item == ITEM_PROJECTILE_HAMMER  && (pPlayer->m_HasProjectileHammer && pChr->m_ProjectileHammer))
 			)
 		{
 			bool UseThe = false;
@@ -345,8 +347,8 @@ void CShop::BuyItem(int ClientID, int Item)
 	}
 	else if (IsType(HOUSE_PLOT_SHOP))
 	{
-		int OwnPlotID = GameServer()->GetPlotID(pPlayer->GetAccID());
-		if (GameServer()->m_aPlots[Item].m_aOwner[0] != 0)
+		int OwnPlotID = GameServer()->m_Plots.GetPlotID(pPlayer->GetAccID());
+		if (GameServer()->m_Plots.GetOwner(Item)[0] != 0)
 		{
 			GameServer()->SendChatTarget(ClientID, pPlayer->Localize("This plot is already sold to someone else"));
 			return;
@@ -361,7 +363,7 @@ void CShop::BuyItem(int ClientID, int Item)
 			GameServer()->SendChatTarget(ClientID, pPlayer->Localize("You already own another plot"));
 			return;
 		}
-		else if (GameServer()->HasPlotByIP(ClientID))
+		else if (GameServer()->m_Plots.HasPlotByIP(ClientID))
 		{
 			GameServer()->SendChatTarget(ClientID, pPlayer->Localize("Your IP address already owns one plot"));
 			return;
@@ -441,14 +443,15 @@ void CShop::BuyItem(int ClientID, int Item)
 										pPlayer->GetCharacter()->GiveWeapon(WEAPON_PORTAL_RIFLE);
 									break;
 		case ITEM_PORTAL_BLOCKER:	pAccount->m_PortalBlocker += Amount; break;
+		case ITEM_PROJECTILE_HAMMER:pPlayer->m_HasProjectileHammer = true; pChr->ProjectileHammer(true, -1, true); break;
 		}
 	}
 	else if (IsType(HOUSE_PLOT_SHOP))
 	{
-		GameServer()->SetPlotExpire(Item);
+		GameServer()->m_Plots.SetPlotExpire(Item);
 		char aBuf[64];
-		str_format(aBuf, sizeof(aBuf), pPlayer->Localize("The plot will expire on %s"), GameServer()->GetDate(GameServer()->m_aPlots[Item].m_ExpireDate));
+		str_format(aBuf, sizeof(aBuf), pPlayer->Localize("The plot will expire on %s"), GameServer()->m_Plots.GetPlotExpireDate(Item));
 		GameServer()->SendChatTarget(ClientID, aBuf);
-		GameServer()->SetPlotInfo(Item, pPlayer->GetAccID());
+		GameServer()->m_Plots.SetPlotInfo(Item, pPlayer->GetAccID());
 	}
 }

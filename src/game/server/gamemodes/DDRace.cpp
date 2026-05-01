@@ -245,7 +245,7 @@ void CGameControllerDDRace::ChangeFlagOwner(CCharacter *pOldCarrier, CCharacter 
 	}
 }
 
-void CGameControllerDDRace::ForceFlagOwner(int ClientID, int Team)
+void CGameControllerDDRace::ForceFlagOwner(int ClientID, int Team, bool PreventTeleport)
 {
 	CFlag *F = m_apFlags[Team];
 	CCharacter *pChr = GameServer()->GetPlayerChar(ClientID);
@@ -255,7 +255,7 @@ void CGameControllerDDRace::ForceFlagOwner(int ClientID, int Team)
 	{
 		if (F->GetCarrier())
 			F->SetLastCarrier(F->GetCarrier()->GetPlayer()->GetCID());
-		F->Grab(ClientID);
+		F->Grab(ClientID, PreventTeleport);
 		F->SetPos(pChr->GetPos());
 		F->SetPrevPos(pChr->GetPos());
 	}

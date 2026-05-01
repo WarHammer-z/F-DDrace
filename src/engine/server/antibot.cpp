@@ -13,7 +13,10 @@ CAntibot::CAntibot() :
 	m_DumpFilterID = -1;
 	m_FetchKindID = -1;
 	for (int i = 0; i < MAX_CLIENTS; i++)
+	{
 		str_copy(m_aKind[i], "pending", sizeof(m_aKind[i]));
+		m_aCount[i] = 0;
+	}
 }
 CAntibot::~CAntibot()
 {
@@ -64,32 +67,40 @@ void CAntibot::Log(const char *pMessage, void *pUser)
 void CAntibot::Report(int ClientID, const char *pMessage, /*int Count,*/ void *pUser)
 {
 	CAntibot *pAntibot = (CAntibot *)pUser;
-	if (!str_comp(pAntibot->m_aKind[ClientID], "pending"))
+	bool IsPending = !str_comp(pAntibot->m_aKind[ClientID], "pending");
+	if (IsPending)
 	{
 		pAntibot->m_FetchKindID = ClientID;
 		pAntibot->Dump(ClientID);
 		pAntibot->m_FetchKindID = -1;
 	}
 
-	if (pAntibot->Config()->m_SvAntibotReportsFilter
-		&& str_comp(pAntibot->m_aKind[ClientID], "known_bot")
-		&& str_comp(pAntibot->m_aKind[ClientID], "weird")
-		&& str_comp(pAntibot->m_aKind[ClientID], "selfbuilt/linux")
-		&& str_comp(pAntibot->m_aKind[ClientID], "pending")
-		&& str_comp(pAntibot->m_aKind[ClientID], "old"))
+	if (!IsPending && str_in_list(pAntibot->Config()->m_SvAntibotSkipKinds, ",", pAntibot->m_aKind[ClientID]))
+		return;
+		
+	pAntibot->m_aCount[ClientID]++;
+	if (IsPending && !pAntibot->Config()->m_SvAntibotLogPending)
 		return;
 
 	char aBuf[256];
-	str_format(aBuf, sizeof(aBuf), "%d: %s", ClientID, pMessage);
+	str_format(aBuf, sizeof(aBuf), "%d: %s%s", ClientID, pMessage, IsPending ? " (pending)" : "");
 	Log(aBuf, pUser);
-
 	pAntibot->Server()->SendWebhookMessage(pAntibot->Config()->m_SvWebhookAntibotURL, aBuf, pAntibot->Config()->m_SvWebhookAntibotName);
 
-	if (pAntibot->Config()->m_SvAntibotTreshold != 0 /*&& Count >= pAntibot->Config()->m_SvAntibotTreshold*/ && str_startswith(pMessage, "known_bot"))
+	if (IsPending || pAntibot->Server()->IsWhitelisted(ClientID))
+		return;
+
+	int Action = pAntibot->Config()->m_SvAntibotAutoAction;
+	int Threshold = pAntibot->Config()->m_SvAntibotThreshold;
+	if (Action && Threshold && pAntibot->m_aCount[ClientID] >= Threshold)
 	{
-		str_format(aBuf, sizeof(aBuf), "%d: %s has been banned", ClientID, pAntibot->Server()->ClientName(ClientID));
+		str_format(aBuf, sizeof(aBuf), "%d: %s has been %s", ClientID, pAntibot->Server()->ClientName(ClientID), Action == 1 ? "arrested" : "banned");
 		pAntibot->Server()->SendWebhookMessage(pAntibot->Config()->m_SvWebhookAntibotURL, aBuf, pAntibot->Config()->m_SvWebhookAntibotName);
 		pAntibot->GameServer()->SetBotDetected(ClientID);
+		// Reset
+		pAntibot->m_aCount[ClientID] = 0;
+		pAntibot->OnPlayerDestroy(ClientID);
+		pAntibot->OnPlayerInit(ClientID);
 	}
 }
 void CAntibot::Teehistorian(const void *pData, int Size, void *pUser)
@@ -183,11 +194,15 @@ void CAntibot::OnHammerFire(int ClientID)
 }
 void CAntibot::OnHammerHit(int ClientID, int TargetID)
 {
+	if (Config()->m_SvAntibotSkipDummyHammer && Server()->HammerflyMarked(ClientID))
+		return;
 	Update();
 	AntibotOnHammerHit(ClientID, TargetID);
 }
 void CAntibot::OnDirectInput(int ClientID)
 {
+	if (Config()->m_SvAntibotSkipDummyHammer && Server()->HammerflyMarked(ClientID))
+		return;
 	Update();
 	AntibotOnDirectInput(ClientID);
 }
@@ -218,6 +233,7 @@ void CAntibot::OnEngineClientDrop(int ClientID, const char *pReason)
 	AntibotOnEngineClientDrop(ClientID, pReason);
 	// Reset for next to determine
 	str_copy(m_aKind[ClientID], "pending", sizeof(m_aKind[ClientID]));
+	m_aCount[ClientID] = 0;
 }
 bool CAntibot::OnEngineClientMessage(int ClientID, const void *pData, int Size, int Flags)
 {
@@ -260,7 +276,10 @@ CAntibot::CAntibot() :
 	m_DumpFilterID = -1;
 	m_FetchKindID = -1;
 	for (int i = 0; i < MAX_CLIENTS; i++)
+	{
 		str_copy(m_aKind[i], "pending", sizeof(m_aKind[i]));
+		m_aCount[i] = 0;
+	}
 }
 CAntibot::~CAntibot()
 {

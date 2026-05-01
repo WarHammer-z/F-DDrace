@@ -355,10 +355,9 @@ void CNetBan::Init(IConsole *pConsole, IStorage *pStorage, CConfig *pConfig)
 	net_host_lookup("localhost", &m_LocalhostIPV4, NETTYPE_IPV4);
 	net_host_lookup("localhost", &m_LocalhostIPV6, NETTYPE_IPV6);
 
-	Console()->Register("ban", "s[ip|range] ?i[minutes] r[reason]", CFGFLAG_SERVER|CFGFLAG_MASTER|CFGFLAG_STORE, ConBan, this, "Ban IP (or IP range) for x minutes for any reason", AUTHED_ADMIN);
 	Console()->Register("unban", "s[ip|range]", CFGFLAG_SERVER|CFGFLAG_MASTER|CFGFLAG_STORE, ConUnban, this, "Unban IP/IP range/banlist entry", AUTHED_ADMIN);
 	Console()->Register("unban_all", "", CFGFLAG_SERVER|CFGFLAG_MASTER|CFGFLAG_STORE, ConUnbanAll, this, "Unban all entries", AUTHED_ADMIN);
-	Console()->Register("bans", "", CFGFLAG_SERVER|CFGFLAG_MASTER|CFGFLAG_STORE, ConBans, this, "Show banlist", AUTHED_ADMIN);
+	Console()->Register("bans", "?i[page]", CFGFLAG_SERVER|CFGFLAG_MASTER|CFGFLAG_STORE, ConBans, this, "Show banlist (page 1 by default, 20 entries per page)", AUTHED_ADMIN);
 	Console()->Register("bans_save", "s[file]", CFGFLAG_SERVER|CFGFLAG_MASTER|CFGFLAG_STORE, ConBansSave, this, "Save banlist in a file", AUTHED_ADMIN);
 }
 
@@ -487,37 +486,6 @@ bool CNetBan::IsBanned(const NETADDR *pAddr, char *pBuf, unsigned BufferSize, in
 	return false;
 }
 
-void CNetBan::ConBan(IConsole::IResult *pResult, void *pUser)
-{
-	CNetBan *pThis = static_cast<CNetBan *>(pUser);
-
-	char aBuf[256];
-	str_copy(aBuf, pResult->GetString(0), sizeof(aBuf));
-	const char *pSeparator = str_find(aBuf, "-");
-
-	const int Minutes = pResult->NumArguments() > 1 ? clamp(pResult->GetInteger(1), 0, 31*24*60) : 30;
-	const char *pReason = pResult->NumArguments() > 2 ? pResult->GetString(2) : "No reason given";
-
-	if(pSeparator == NULL || pSeparator[1] == '\0')
-	{
-		NETADDR Addr;
-		if(net_addr_from_str(&Addr, aBuf) == 0)
-			pThis->BanAddr(&Addr, Minutes*60, pReason);
-		else
-			pThis->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "net_ban", "ban error (invalid network address)");
-	}
-	else
-	{
-		aBuf[pSeparator-&aBuf[0]] = '\0';
-
-		CNetRange Range;
-		if(net_addr_from_str(&Range.m_LB, aBuf) == 0 && net_addr_from_str(&Range.m_UB, pSeparator+1) == 0)
-			pThis->BanRange(&Range, Minutes*60, pReason);
-		else
-			pThis->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "net_ban", "ban error (invalid range)");
-	}
-}
-
 void CNetBan::ConUnban(IConsole::IResult *pResult, void *pUser)
 {
 	CNetBan *pThis = static_cast<CNetBan *>(pUser);
@@ -562,22 +530,58 @@ void CNetBan::ConBans(IConsole::IResult *pResult, void *pUser)
 {
 	CNetBan *pThis = static_cast<CNetBan *>(pUser);
 
-	int Count = 0;
+	const int NumBans = pThis->m_BanAddrPool.Num() + pThis->m_BanRangePool.Num();
+	if(NumBans == 0)
+	{
+		pThis->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "net_ban", "The ban list is empty.");
+		return;
+	}
+
+	static constexpr int ENTRIES_PER_PAGE = 20;
+	const int NumPages = std::ceil(NumBans / (float)ENTRIES_PER_PAGE);
+	const int Page = pResult->NumArguments() > 0 ? pResult->GetInteger(0) : 1;
+
 	char aBuf[256], aMsg[256];
-	for(CBanAddr *pBan = pThis->m_BanAddrPool.First(); pBan; pBan = pBan->m_pNext)
+	if(Page <= 0 || Page > NumPages)
 	{
-		pThis->MakeBanInfo(pBan, aBuf, sizeof(aBuf), MSGTYPE_LIST);
-		str_format(aMsg, sizeof(aMsg), "#%i %s", Count++, aBuf);
-		pThis->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "net_ban", aMsg);
+		str_format(aMsg, sizeof(aMsg), "Invalid page number. There %s %d %s available.", NumPages == 1 ? "is" : "are", NumPages, NumPages == 1 ? "page" : "pages");
+		pThis->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "net_ban", aMsg);
+		return;
 	}
-	for(CBanRange *pBan = pThis->m_BanRangePool.First(); pBan; pBan = pBan->m_pNext)
+
+	const int Start = (Page - 1) * ENTRIES_PER_PAGE;
+	const int End = Page * ENTRIES_PER_PAGE;
+	int Count = 0;
+	for(CBanAddr *pBan = pThis->m_BanAddrPool.First(); pBan; pBan = pBan->m_pNext, Count++)
 	{
+		if(Count < Start)
+		{
+			continue;
+		}
+		else if(Count >= End)
+		{
+			break;
+		}
 		pThis->MakeBanInfo(pBan, aBuf, sizeof(aBuf), MSGTYPE_LIST);
-		str_format(aMsg, sizeof(aMsg), "#%i %s", Count++, aBuf);
-		pThis->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "net_ban", aMsg);
+		str_format(aMsg, sizeof(aMsg), "#%i %s", Count, aBuf);
+		pThis->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "net_ban", aMsg);
 	}
-	str_format(aMsg, sizeof(aMsg), "%d %s", Count, Count==1?"ban":"bans");
-	pThis->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "net_ban", aMsg);
+	for(CBanRange *pBan = pThis->m_BanRangePool.First(); pBan; pBan = pBan->m_pNext, Count++)
+	{
+		if(Count < Start)
+		{
+			continue;
+		}
+		else if(Count >= End)
+		{
+			break;
+		}
+		pThis->MakeBanInfo(pBan, aBuf, sizeof(aBuf), MSGTYPE_LIST);
+		str_format(aMsg, sizeof(aMsg), "#%i %s", Count, aBuf);
+		pThis->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "net_ban", aMsg);
+	}
+	str_format(aMsg, sizeof(aMsg), "%d %s, showing entries %d - %d (page %d/%d)", NumBans, NumBans == 1 ? "ban" : "bans", Start, Count - 1, Page, NumPages);
+	pThis->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "net_ban", aMsg);
 }
 
 void CNetBan::ConBansSave(IConsole::IResult *pResult, void *pUser)
@@ -600,7 +604,16 @@ void CNetBan::ConBansSave(IConsole::IResult *pResult, void *pUser)
 	{
 		int Min = pBan->m_Info.m_Expires>-1 ? (pBan->m_Info.m_Expires-Now+59)/60 : -1;
 		net_addr_str(&pBan->m_Data, aAddrStr1, sizeof(aAddrStr1), false);
-		str_format(aBuf, sizeof(aBuf), "ban %s %i %s", aAddrStr1, Min, pBan->m_Info.m_aReason);
+
+		char aSanitizedReason[128];
+		str_copy(aSanitizedReason, pBan->m_Info.m_aReason, sizeof(aSanitizedReason));
+		str_sanitize_cc(aSanitizedReason);
+
+		char aEscapedReason[256];
+		char *pDst = aEscapedReason;
+		str_escape(&pDst, aSanitizedReason, aEscapedReason + sizeof(aEscapedReason));
+
+		str_format(aBuf, sizeof(aBuf), "ban %s %i %s", aAddrStr1, Min, aEscapedReason);
 		io_write(File, aBuf, str_length(aBuf));
 		io_write_newline(File);
 	}
@@ -609,7 +622,16 @@ void CNetBan::ConBansSave(IConsole::IResult *pResult, void *pUser)
 		int Min = pBan->m_Info.m_Expires>-1 ? (pBan->m_Info.m_Expires-Now+59)/60 : -1;
 		net_addr_str(&pBan->m_Data.m_LB, aAddrStr1, sizeof(aAddrStr1), false);
 		net_addr_str(&pBan->m_Data.m_UB, aAddrStr2, sizeof(aAddrStr2), false);
-		str_format(aBuf, sizeof(aBuf), "ban %s-%s %i %s", aAddrStr1, aAddrStr2, Min, pBan->m_Info.m_aReason);
+
+		char aSanitizedReason[128];
+		str_copy(aSanitizedReason, pBan->m_Info.m_aReason, sizeof(aSanitizedReason));
+		str_sanitize_cc(aSanitizedReason);
+
+		char aEscapedReason[256];
+		char *pDst = aEscapedReason;
+		str_escape(&pDst, aSanitizedReason, aEscapedReason + sizeof(aEscapedReason));
+
+		str_format(aBuf, sizeof(aBuf), "ban %s-%s %i %s", aAddrStr1, aAddrStr2, Min, aEscapedReason);
 		io_write(File, aBuf, str_length(aBuf));
 		io_write_newline(File);
 	}

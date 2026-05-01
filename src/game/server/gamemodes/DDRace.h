@@ -2,12 +2,12 @@
 #define GAME_SERVER_GAMEMODES_DDRACE_H
 #include <game/server/gamecontroller.h>
 #include <game/server/teams.h>
-#include <game/server/entities/door.h>
+#include <game/server/entities/map/door.h>
 
 #include <vector>
 #include <map>
 
-#include <game/server/entities/flag.h>
+#include <game/server/entities/interactive/flag.h>
 
 class CGameControllerDDRace : public IGameController
 {
@@ -26,7 +26,7 @@ public:
 	virtual bool OnEntity(int Index, vec2 Pos, int Layer = 0, int Flags = 0, int Number = 0);
 	virtual int OnCharacterDeath(class CCharacter* pVictim, class CPlayer* pKiller, int Weapon);
 
-	void ForceFlagOwner(int ClientID, int Team);
+	void ForceFlagOwner(int ClientID, int Team, bool PreventTeleport = false);
 	void ChangeFlagOwner(CCharacter* pOldCarrier, CCharacter* pNewCarrier);
 	int HasFlag(CCharacter* pChr);
 

@@ -19,12 +19,14 @@
 #include <game/version.h>
 
 #include "entities/character.h"
-#include "entities/money.h"
-#include "game/server/entities/helicopter/helicopter.h"
-#include "entities/speedup.h"
-#include "entities/button.h"
-#include "entities/teleporter.h"
-#include "entities/playercounter.h"
+#include "entities/interactive/money.h"
+#include "entities/interactive/vehicle/spider.h"
+#include "entities/interactive/vehicle/helicopter.h"
+#include "entities/map/draweditor/speedup.h"
+#include "entities/map/draweditor/button.h"
+#include "entities/map/draweditor/teleporter.h"
+#include "entities/map/draweditor/drawtile.h"
+#include "entities/map/playercounter.h"
 #include "gamemodes/DDRace.h"
 #include "teeinfo.h"
 #include "gamecontext.h"
@@ -32,16 +34,13 @@
 #include "houses/shop.h"
 #include "houses/bank.h"
 #include "houses/tavern.h"
-#include "minigames/arenas.h"
 
-#include "entities/flag.h"
-#include "entities/lasertext.h"
-#include <fstream>
+#include "entities/interactive/flag.h"
+#include "entities/misc/lasertext.h"
 #include <limits>
 #include <string>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unordered_map>
 #include <cstdarg>
 #include <cstdio>
 
@@ -69,6 +68,9 @@ void CGameContext::Construct(int Resetting)
 	for(int i = 0; i < MAX_CLIENTS; i++)
 		m_apPlayers[i] = 0;
 
+	mem_zero(&m_aLastPlayerInput, sizeof(m_aLastPlayerInput));
+	std::fill(std::begin(m_aPlayerHasInput), std::end(m_aPlayerHasInput), false);
+
 	m_pController = 0;
 	m_VoteCloseTime = 0;
 	m_VoteCancelTime = 0;
@@ -77,6 +79,7 @@ void CGameContext::Construct(int Resetting)
 	m_NumVoteOptions = 0;
 	m_LastMapVote = 0;
 	m_LockTeams = 0;
+	m_NonEmptySince = 0;
 
 	if(Resetting==NO_RESET)
 	{
@@ -88,10 +91,9 @@ void CGameContext::Construct(int Resetting)
 			m_pHouses[i] = 0;
 		for (int i = 0; i < NUM_MINIGAMES; i++)
 			m_pMinigames[i] = 0;
-		m_NumAccountSystemBans = 0;
+		m_Accounts.m_NumAccountSystemBans = 0;
 	}
 
-	m_aDeleteTempfile[0] = 0;
 	m_ChatResponseTargetID = -1;
 	m_TeeHistorianActive = false;
 
@@ -182,47 +184,37 @@ CTuningParams *CGameContext::TuningFromChrOrZone(int ClientID, int Zone)
 	return &m_Tuning;
 }
 
-bool CGameContext::ResetLockedTune(LOCKED_TUNES *pLockedTunings, const char *pParam)
+int CGameContext::SetLockedTune(LOCKED_TUNES *pLockedTunings, CLockedTune &Tune, bool AllowGlobalValues)
 {
-	if (!IsTuneInList(pLockedTunings, pParam))
-		return false;
 	float GlobalValue;
-	if (!m_Tuning.Get(pParam, &GlobalValue))
-		return false;
-	CLockedTune Tune(pParam, GlobalValue);
-	SetLockedTune(pLockedTunings, Tune);
-	return true;
-}
+	if(!m_Tuning.Get(Tune.m_aParam, &GlobalValue))
+		return 0;
 
-bool CGameContext::SetLockedTune(LOCKED_TUNES *pLockedTunings, CLockedTune &Tune)
-{
-	const char *pParam = Tune.m_aParam;
-	float NewValue = Tune.m_Value;
-
-	float GlobalValue;
-	if(!m_Tuning.Get(pParam, &GlobalValue))
-		return false;
-
+	bool IsGlobalValue = Tune.m_Value.Get() == (int)(GlobalValue * 100.f);
 	for(unsigned int i = 0; i < pLockedTunings->size(); i++)
 	{
-		if(str_comp_nocase(pLockedTunings->at(i).m_aParam, pParam) == 0)
+		if(str_comp_nocase(pLockedTunings->at(i).m_aParam, Tune.m_aParam) == 0)
 		{
-			if(NewValue == GlobalValue)
+			if(IsGlobalValue)
+			{
 				pLockedTunings->erase(pLockedTunings->begin() + i);
-			else
-				pLockedTunings->at(i).m_Value = NewValue;
-			return true;
+				return 3;
+			}
+			pLockedTunings->at(i).m_Value = Tune.m_Value;
+			return 2;
 		}
 	}
 
-	CLockedTune LockedTune(pParam, NewValue);
-	pLockedTunings->push_back(LockedTune);
-	return true;
+	if (IsGlobalValue && !AllowGlobalValues)
+		return 0;
+
+	pLockedTunings->push_back(Tune);
+	return 1;
 }
 
 void CGameContext::ApplyTuneLock(LOCKED_TUNES *pLockedTunings, int TuneLock)
 {
-	if(TuneLock < 0 || TuneLock >= NUM_TUNEZONES)
+	if(TuneLock < 0 || TuneLock >= TuneZone::NUM)
 	{
 		pLockedTunings->clear();
 		return;
@@ -237,7 +229,7 @@ CTuningParams *CGameContext::ApplyLockedTunings(CTuningParams *pTuning, LOCKED_T
 	static CTuningParams Tuning;
 	Tuning = *pTuning;
 	for(unsigned int i = 0; i < LockedTunings.size(); i++)
-		Tuning.Set(LockedTunings[i].m_aParam, LockedTunings[i].m_Value);
+		Tuning.Set(LockedTunings[i].m_aParam, (float)LockedTunings[i].m_Value);
 	return &Tuning;
 }
 
@@ -299,7 +291,7 @@ void CGameContext::FillAntibot(CAntibotRoundData *pData)
 
 void CGameContext::CreateDamage(vec2 Pos, int Id, vec2 Source, int HealthAmount, int ArmorAmount, bool Self, Mask128 Mask, int SevendownAmount)
 {
-	float a = 3 * 3.14159f / 2 + -atan2(Source.x, Source.y);
+	float a = 3 * pi / 2 + -std::atan2(Source.x, Source.y);
 	float s = a-pi/3;
 	float e = a+pi/3;
 
@@ -307,7 +299,7 @@ void CGameContext::CreateDamage(vec2 Pos, int Id, vec2 Source, int HealthAmount,
 		SevendownAmount = HealthAmount+ArmorAmount;
 	for(int i = 0; i < SevendownAmount; i++)
 	{
-		float f = mix(s, e, float(i+1)/float(SevendownAmount+2));
+		float f = mix(s, e, (i+1)/(float)(SevendownAmount+1));
 		int *pEvent = (int*)m_Events.Create(20 + NUM_NETOBJTYPES, 3*4, Mask);
 		if(pEvent)
 		{
@@ -358,9 +350,9 @@ void CGameContext::CreateExplosion(vec2 Pos, int Owner, int Weapon, bool NoDamag
 	float Radius = g_pData->m_Explosion.m_Radius;
 	float InnerRadius = 48.0f;
 
-	int Types = (1<<CGameWorld::ENTTYPE_CHARACTER);
+	int64 Types = (1ULL<<CGameWorld::ENTTYPE_CHARACTER);
 	if (Config()->m_SvInteractiveDrops)
-		Types |= (1<<CGameWorld::ENTTYPE_FLAG) | (1<<CGameWorld::ENTTYPE_PICKUP_DROP) | (1<<CGameWorld::ENTTYPE_MONEY) | (1<<CGameWorld::ENTTYPE_GROG) | (1<<CGameWorld::ENTTYPE_HELICOPTER);
+		Types |= (1ULL<<CGameWorld::ENTTYPE_FLAG) | (1ULL<<CGameWorld::ENTTYPE_PICKUP_DROP) | (1ULL<<CGameWorld::ENTTYPE_MONEY) | (1ULL<<CGameWorld::ENTTYPE_GROG) | (1ULL<<CGameWorld::ENTTYPE_HELICOPTER) | (1ULL<<CGameWorld::ENTTYPE_SPIDER);
 	int Num = m_World.FindEntitiesTypes(Pos, Radius, (CEntity * *)apEnts, MAX_CLIENTS, Types);
 	Mask128 TeamMask = Mask128();
 	for (int i = 0; i < Num; i++)
@@ -383,9 +375,9 @@ void CGameContext::CreateExplosion(vec2 Pos, int Owner, int Weapon, bool NoDamag
 				if (((CFlag *)pEnt)->GetCarrier())
 					continue;
 			}
-			else if (pEnt->GetObjType() == CGameWorld::ENTTYPE_HELICOPTER)
+			else if (pEnt->GetObjType() == CGameWorld::ENTTYPE_HELICOPTER || pEnt->GetObjType() == CGameWorld::ENTTYPE_SPIDER)
 			{
-				if (((CHelicopter *)pEnt)->IsBuilding())
+				if (((IVehicle *)pEnt)->IsBuilding())
 					continue;
 
 				l -= pEnt->GetProximityRadius();
@@ -427,8 +419,8 @@ void CGameContext::CreateExplosion(vec2 Pos, int Owner, int Weapon, bool NoDamag
 			{
 				if (pEnt->GetObjType() == CGameWorld::ENTTYPE_FLAG)
 					((CFlag *)pEnt)->SetAtStand(false);
-				else if (pEnt->GetObjType() == CGameWorld::ENTTYPE_HELICOPTER)
-					((CHelicopter *)pEnt)->ExplosionDamage(Strength, Pos, Owner);
+				else if (pEnt->GetObjType() == CGameWorld::ENTTYPE_HELICOPTER || pEnt->GetObjType() == CGameWorld::ENTTYPE_SPIDER)
+					((IVehicle *)pEnt)->ExplosionDamage(Strength, Pos, Owner);
 
 				vec2 Temp = pEnt->GetVel() + Force;
 				pEnt->SetVel(ClampVel(pEnt->GetMoveRestrictions(), Temp));
@@ -555,14 +547,27 @@ void CGameContext::SendChatTeam(int Team, const char *pText, CFormatArg *pArgs, 
 	}
 }
 
-void CGameContext::SendModLogMessage(int ClientID, const char *pMsg)
+void CGameContext::SendModLogMessage(int ClientID, const char *pMsg, bool IsAuth)
 {
-	if (ClientID < 0)
+	if (ClientID < 0 && ClientID != MODLOG_ID_SERVER)
 		return;
 
 	char aName[128];
-	str_format(aName, sizeof(aName), "%s (%s)", Server()->ClientName(ClientID), Server()->GetAuthIdent(ClientID));
-	Server()->SendWebhookMessage(Config()->m_SvWebhookModLogURL, pMsg, aName, FormatURL(GetAvatarURL(ClientID)));
+	char aAvatarURL[256];
+	if (ClientID >= 0 && ClientID < MAX_CLIENTS)
+	{
+		str_format(aName, sizeof(aName), "%s (%s)", Server()->ClientName(ClientID), Server()->GetAuthIdent(ClientID));
+		str_copy(aAvatarURL, GetAvatarURL(ClientID), sizeof(aAvatarURL));
+	}
+	else if (ClientID == MODLOG_ID_SERVER)
+	{
+		str_copy(aName, "[Server]", sizeof(aName));
+		str_copy(aAvatarURL, Config()->m_SvWebhookChatAvatarURL, sizeof(aAvatarURL));
+	}
+
+	char aMsg[512];
+	str_format(aMsg, sizeof(aMsg), "%s on port %d (%s)", pMsg, Config()->m_SvPort, Config()->m_SvMap);
+	Server()->SendWebhookMessage(IsAuth ? Config()->m_SvWebhookAuthLogURL : Config()->m_SvWebhookModLogURL, aMsg, aName, FormatURL(aAvatarURL));
 }
 
 const char *CGameContext::GetAvatarURL(int ClientID)
@@ -683,7 +688,7 @@ bool CGameContext::SendChat(int ChatterClientID, int Mode, int To, const char *p
 
 		if (ChatterClientID >= 0 && ChatterClientID < MAX_CLIENTS)
 		{
-			str_format(aWebhookName, sizeof(aWebhookName), "%s [%d]", Server()->ClientName(ChatterClientID), m_Accounts[m_apPlayers[ChatterClientID]->GetAccID()].m_Level);
+			str_format(aWebhookName, sizeof(aWebhookName), "%s [%d]", Server()->ClientName(ChatterClientID), m_Accounts.Get(m_apPlayers[ChatterClientID]->GetAccID()).m_Level);
 			if (Config()->m_SvWebhookChatSkinAvatars)
 				str_copy(aAvatarURL, GetAvatarURL(ChatterClientID), sizeof(aAvatarURL));
 		}
@@ -790,7 +795,7 @@ bool CGameContext::SendChat(int ChatterClientID, int Mode, int To, const char *p
 	{
 		Msg.m_Mode = CHAT_ALL;
 		for (int i = 0; i < MAX_CLIENTS; i++)
-			if (m_apPlayers[i] && m_Accounts[m_apPlayers[i]->GetAccID()].m_PoliceLevel)
+			if (m_apPlayers[i] && m_Accounts.Get(m_apPlayers[i]->GetAccID()).m_PoliceLevel)
 			{
 				str_format_args(aBuf, sizeof(aBuf), m_apPlayers[i]->Localize(pText), pArgs, NumArgs);
 				str_format(aText, sizeof(aText), "[POLICE-CHANNEL] %s", aBuf);
@@ -834,6 +839,24 @@ bool CGameContext::SendChat(int ChatterClientID, int Mode, int To, const char *p
 	return true;
 }
 
+static void UnescapeNewlines(char *pBuf)
+{
+	int i, j;
+	for(i = 0, j = 0; pBuf[i]; i++, j++)
+	{
+		if(pBuf[i] == '\\' && pBuf[i + 1] == 'n')
+		{
+			pBuf[j] = '\n';
+			i++;
+		}
+		else if(i != j)
+		{
+			pBuf[j] = pBuf[i];
+		}
+	}
+	pBuf[j] = '\0';
+}
+
 void CGameContext::SendBroadcast(const char* pText, int ClientID, bool IsImportant, CFormatArg *pArgs, int NumArgs)
 {
 	if (ClientID == -1)
@@ -857,20 +880,7 @@ void CGameContext::SendBroadcast(const char* pText, int ClientID, bool IsImporta
 	// This is done clientside in 0.7, but DDNet clients only parse aBuf[i] == '\n'
 	if (Server()->IsSevendown(ClientID))
 	{
-		int i, j;
-		for(i = 0, j = 0; aBuf[i]; i++, j++)
-		{
-			if(aBuf[i] == '\\' && aBuf[i + 1] == 'n')
-			{
-				aBuf[j] = '\n';
-				i++;
-			}
-			else if(i != j)
-			{
-				aBuf[j] = aBuf[i];
-			}
-		}
-		aBuf[j] = '\0';
+		UnescapeNewlines(aBuf);
 	}
 
 	Msg.m_pMessage = aBuf;
@@ -911,6 +921,61 @@ void CGameContext::SendWeaponPickup(int ClientID, int Weapon)
 		CNetMsg_Sv_WeaponPickup Msg;
 		Msg.m_Weapon = Weapon;
 		Server()->SendPackMsg(&Msg, MSGFLAG_VITAL, ClientID);
+	}
+}
+
+void CGameContext::SendServerAlert(const char *pMessage)
+{
+	for(int ClientId = 0; ClientId < MAX_CLIENTS; ClientId++)
+	{
+		if(!m_apPlayers[ClientId])
+		{
+			continue;
+		}
+
+		if(GetClientDDNetVersion(ClientId) >= VERSION_DDNET_IMPORTANT_ALERT)
+		{
+			CNetMsg_Sv_ServerAlert Msg;
+			Msg.m_pMessage = pMessage;
+			Server()->SendPackMsg(&Msg, MSGFLAG_VITAL | MSGFLAG_NORECORD, ClientId);
+		}
+		else
+		{
+			char aBroadcastText[1024 + 32];
+			str_copy(aBroadcastText, "SERVER ALERT\n\n");
+			str_append(aBroadcastText, pMessage, sizeof(aBroadcastText));
+			SendBroadcast(aBroadcastText, ClientId, true);
+		}
+	}
+
+	// Record server alert to demos exactly once
+	// TODO: Workaround https://github.com/ddnet/ddnet/issues/11144 by using client ID 0,
+	//       otherwise the message is recorded multiple times.
+	CNetMsg_Sv_ServerAlert Msg;
+	Msg.m_pMessage = pMessage;
+	Server()->SendPackMsg(&Msg, MSGFLAG_NOSEND, 0);
+}
+
+void CGameContext::SendModeratorAlert(const char *pMessage, int ToClientId)
+{
+	dbg_assert(ToClientId >= 0 && ToClientId < MAX_CLIENTS, "SendImportantAlert ToClientId invalid");
+	dbg_assert(m_apPlayers[ToClientId] != nullptr, "Client not online");
+
+	if(GetClientDDNetVersion(ToClientId) >= VERSION_DDNET_IMPORTANT_ALERT)
+	{
+		CNetMsg_Sv_ModeratorAlert Msg;
+		Msg.m_pMessage = pMessage;
+		Server()->SendPackMsg(&Msg, MSGFLAG_VITAL | MSGFLAG_NORECORD, ToClientId);
+	}
+	else
+	{
+		char aBroadcastText[1024 + 32];
+		str_copy(aBroadcastText, "MODERATOR ALERT\n\n");
+		str_append(aBroadcastText, pMessage, sizeof(aBroadcastText));
+		SendBroadcast(aBroadcastText, ToClientId, true);
+		char aLogMsg[128];
+		str_format(aLogMsg, sizeof(aLogMsg), "Notice: player uses an old client version and may not see moderator alerts: %s (ID %d)", Server()->ClientName(ToClientId), ToClientId);
+		Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "moderator_alert", aLogMsg);
 	}
 }
 
@@ -1229,20 +1294,29 @@ void CGameContext::SendTuningParams(int ClientID, int Zone)
 
 	if (pChr)
 	{
-		if (pChr->m_FakeTuneCollision || pChr->m_InSnake)
+		if (pChr->m_FakeTuneCollision || pChr->m_InSnake || (pChr->m_Passive && !pChr->m_Super))
 			Tunings.m_PlayerCollision = 0.f;
 		if ((pChr->m_Passive && !pChr->m_Super) || pChr->m_Snake.Active())
 			Tunings.m_PlayerHooking = 0.f;
 
 		bool IsActivelyPlayingDurak = Durak()->ActivelyPlaying(ClientID);
-		if (pChr->m_DrawEditor.Active() || pChr->m_pHelicopter || pChr->m_Snake.Active())
+		if (pChr->m_DrawEditor.Active() || pChr->m_pVehicle || pChr->m_Snake.Active())
 			Tunings.m_HookFireSpeed = 0.f;
-		if (pChr->m_pHelicopter || pChr->m_Snake.Active() || IsActivelyPlayingDurak)
+		if (pChr->m_pVehicle || pChr->m_Snake.Active() || IsActivelyPlayingDurak)
 			Tunings.m_HookDragAccel = 0.f;
-		if (pChr->m_pHelicopter || pChr->m_InSnake || IsActivelyPlayingDurak)
+		if (pChr->m_pVehicle || pChr->m_InSnake || IsActivelyPlayingDurak)
 			Tunings.m_HookDragSpeed = 0.f;
 
-		if (pChr->m_DrawEditor.Active() || pChr->m_pHelicopter|| pChr->m_InSnake || IsActivelyPlayingDurak
+		if (pChr->m_MoveRestrictions&CANTMOVE_DOWN_SOLID_DRAWTILE)
+		{
+			Tunings.m_Gravity = 0.f;
+			Tunings.m_AirControlAccel = Tunings.m_GroundControlAccel;
+			Tunings.m_AirControlSpeed = Tunings.m_GroundControlSpeed;
+			Tunings.m_AirFriction = Tunings.m_GroundFriction;
+			Tunings.m_AirJumpImpulse = Tunings.m_GroundJumpImpulse;
+		}
+
+		if (pChr->m_DrawEditor.Active() || pChr->m_pVehicle || pChr->m_InSnake || IsActivelyPlayingDurak
 			|| (!Server()->IsSevendown(ClientID) && ((pChr->m_FreezeTime && Config()->m_SvFreezePrediction) || pChr->GetPlayer()->m_TeeControllerID != -1)))
 		{
 			Tunings.m_GroundControlSpeed = 0.f;
@@ -1253,8 +1327,53 @@ void CGameContext::SendTuningParams(int ClientID, int Zone)
 			Tunings.m_AirControlAccel = 0.f;
 		}
 
-		if (pChr->m_MoveRestrictions&CANTMOVE_DOWN_LASERDOOR || pChr->m_pHelicopter || pChr->m_InSnake)
+		if (pChr->m_MoveRestrictions&CANTMOVE_DOWN_LASERDOOR || pChr->m_pVehicle || pChr->m_InSnake)
 			Tunings.m_Gravity = 0.f;
+
+		if (pChr->m_pVehicle)
+			Tunings.m_ExplosionStrength = 0.f;
+
+		// AntiPing
+		if (pChr->GetPlayer()->AntiPing())
+		{
+			const int PreventReloadTimer = 1000000;
+			int ActiveWeapon = pChr->GetActiveWeapon();
+			int WeaponType = GetWeaponType(ActiveWeapon);
+			if (ActiveWeapon != WEAPON_LASER && WeaponType == WEAPON_LASER)
+			{
+				Tunings.m_LaserReach = 0.f;
+
+				if (ActiveWeapon == WEAPON_TASER)
+					Tunings.m_LaserFireDelay = Tunings.m_TaserFireDelay;
+				else if (ActiveWeapon == WEAPON_PORTAL_RIFLE)
+					Tunings.m_LaserFireDelay = Tunings.m_PortalRifleFireDelay;
+				else if (ActiveWeapon == WEAPON_PLASMA_RIFLE)
+					Tunings.m_LaserFireDelay = Tunings.m_PlasmaRifleFireDelay;
+				else if (ActiveWeapon == WEAPON_PROJECTILE_RIFLE)
+					Tunings.m_LaserFireDelay = Tunings.m_ProjectileRifleFireDelay;
+				else if (ActiveWeapon == WEAPON_TELE_RIFLE)
+					Tunings.m_LaserFireDelay = Tunings.m_TeleRifleFireDelay;
+				else if (ActiveWeapon == WEAPON_LIGHTNING_LASER)
+					Tunings.m_LaserFireDelay = Tunings.m_LightningLaserFireDelay;
+			}
+			else if (ActiveWeapon == WEAPON_SHOTGUN && pChr->GetPlayer()->m_Gamemode == GAMEMODE_VANILLA)
+				Tunings.m_LaserReach = 0;
+			else if (ActiveWeapon == WEAPON_STRAIGHT_GRENADE)
+				Tunings.m_GrenadeFireDelay = Tunings.m_StraightGrenadeFireDelay;
+			else if (ActiveWeapon == WEAPON_BALL_GRENADE)
+				Tunings.m_GrenadeFireDelay = Tunings.m_BallGrenadeFireDelay;
+			else if (ActiveWeapon == WEAPON_HEART_GUN)
+				Tunings.m_GunFireDelay = Tunings.m_HeartGunFireDelay;
+			else if (ActiveWeapon == WEAPON_LIGHTSABER)
+				Tunings.m_GunFireDelay = PreventReloadTimer;
+			else if (ActiveWeapon == WEAPON_TELEKINESIS || ActiveWeapon == WEAPON_DRAW_EDITOR)
+			{
+				//Tunings.m_NinjaFireDelay = PreventReloadTimer; // Avoided by not sending CHARACTERFLAG_WEAPON_NINJA at all
+				// The way everything works the client might mispredict a grenade or gun proj or a laser even though we are on ninja. prevent that
+				//Tunings.m_GunFireDelay = Tunings.m_ShotgunFireDelay = Tunings.m_GrenadeFireDelay = Tunings.m_LaserFireDelay = PreventReloadTimer;
+				Tunings.m_LaserReach = 0.f;
+			}
+		}
 	}
 
 	CMsgPacker Msg(NETMSGTYPE_SV_TUNEPARAMS);
@@ -1297,9 +1416,15 @@ void CGameContext::OnTick()
 	for (int i = 0; i < NUM_MINIGAMES; i++)
 		m_pMinigames[i]->Tick();
 
+	for (int i = 0; i < 2; i++)
+		if (!m_aMinigameDisabled[i == 0 ? MINIGAME_INSTAGIB_BOOMFNG : MINIGAME_INSTAGIB_FNG])
+			InstagibTick(i);
+
 	m_RainbowName.Tick();
 	// has to happen before playerticks, as the wanted players get added there and are resetted after CVotingMenu::Tick
 	m_VotingMenu.Tick();
+	m_Plots.Tick();
+	m_Accounts.Tick();
 
 	if(m_TeeHistorianActive)
 	{
@@ -1329,10 +1454,49 @@ void CGameContext::OnTick()
 			// Do it safely here so we dont get any crashes
 			if (pPlayer->m_BotDetected)
 			{
-				char aBuf[64];
-				str_format(aBuf, sizeof(aBuf), "Bot detected (%s)", Server()->ClientName(i));
-				Server()->Ban(i, 60*Config()->m_SvAntibotBanMinutes, aBuf);
+				const int Action = Config()->m_SvAntibotAutoAction;
+				if (Action == 1)
+				{
+					int Seconds = Config()->m_SvAntibotAutoActionTime;
+					if (JailPlayer(i, Seconds, MODLOG_ID_SERVER))
+					{
+						char aBuf[256];
+						SendChatPoliceFormat(Localizable("'%s' has been arrested for using a suspicious client (%d seconds arrest)"), Server()->ClientName(i), Seconds);
+						str_format(aBuf, sizeof(aBuf), pPlayer->Localize("You were arrested for %d seconds for using a suspicious client. Try using official DDNet client or disable dummy hammerfly."), Seconds);
+						SendChatTarget(i, aBuf);
+					}
+
+					// Reset, so we dont loop
+					pPlayer->m_BotDetected = false;
+				}
+				else if (Action == 2)
+				{
+					char aBuf[64];
+					str_format(aBuf, sizeof(aBuf), "Bot detected (%s)", Server()->ClientName(i));
+					int Seconds = 60 * Config()->m_SvAntibotAutoActionTime;
+					Server()->Ban(i, Seconds, aBuf);
+				}
+
 				continue;
+			}
+
+			if (Config()->m_SvDnsblJail && Server()->DnsblBlack(i) && !pPlayer->m_ProcessedDnsblJail)
+			{
+				int Seconds = 60 * Config()->m_SvDnsblJailTime;
+				if (JailPlayer(i, Seconds, MODLOG_ID_SERVER))
+				{
+					char aBuf[256];
+					SendChatPoliceFormat(Localizable("'%s' has been arrested for using a VPN (%d seconds arrest)"), Server()->ClientName(i), Seconds);
+					str_format(aBuf, sizeof(aBuf), pPlayer->Localize("You were arrested for %d seconds"), Seconds);
+					if (Config()->m_SvDnsblBanReason[0])
+					{
+						char aReason[132];
+						str_format(aReason, sizeof(aReason), " (%s)", Config()->m_SvDnsblBanReason);
+						str_append(aBuf, aReason, sizeof(aBuf));
+					}
+					SendChatTarget(i, aBuf);
+					pPlayer->m_ProcessedDnsblJail = true;
+				}
 			}
 
 			// send vote options
@@ -1376,6 +1540,10 @@ void CGameContext::OnTick()
 				for(int i = 0; i < MAX_CLIENTS; i++)
 				{
 					if(!m_apPlayers[i] || m_apPlayers[i]->GetTeam() == TEAM_SPECTATORS || aVoteChecked[i])	// don't count in votes by spectators
+						continue;
+
+					// don't count votes by blacklisted clients
+					if(Config()->m_SvDnsblVote && !m_pServer->DnsblWhite(i))
 						continue;
 
 					int ActVote = m_apPlayers[i]->m_Vote;
@@ -1443,16 +1611,6 @@ void CGameContext::OnTick()
 			m_aVoteMutes[i] = m_aVoteMutes[m_NumVoteMutes];
 		}
 	}
-	for (int i = 0; i < m_NumAccountSystemBans; i++)
-	{
-		// either reset if expired or if ip did not get banned reset it after ACC_SYS_BAN_DELAY seconds
-		if ((m_aAccountSystemBans[i].m_Expire > 0 && m_aAccountSystemBans[i].m_Expire <= Server()->Tick())
-			|| (Server()->Tick() > m_aAccountSystemBans[i].m_LastAttempt + ACC_SYS_BAN_DELAY * Server()->TickSpeed()))
-		{
-			m_NumAccountSystemBans--;
-			m_aAccountSystemBans[i] = m_aAccountSystemBans[m_NumAccountSystemBans];
-		}
-	}
 
 	if (Server()->Tick() % (Config()->m_SvAnnouncementInterval * Server()->TickSpeed() * 60) == 0)
 	{
@@ -1512,51 +1670,10 @@ void CGameContext::OnTick()
 	}
 
 	// F-DDrace
-	if (Server()->Tick() > m_LastDataSaveTick + Server()->TickSpeed() * Config()->m_SvDataSaveInterval * 60)
-	{
-		// save all accounts
-		dbg_msg("acc", "automatic account saving...");
-		for (unsigned int i = ACC_START; i < m_Accounts.size(); i++)
-			WriteAccountStats(i);
-		for (int i = 0; i < Collision()->m_NumPlots + 1; i++)
-			WritePlotStats(i);
-		WriteMoneyListFile();
-		SaveCurrentTopAccounts();
-		m_LastDataSaveTick = Server()->Tick();
-	}
-
-	// minigames
-	if (!m_aMinigameDisabled[MINIGAME_SURVIVAL])
-		SurvivalTick();
-
-	for (int i = 0; i < 2; i++)
-		if (!m_aMinigameDisabled[i == 0 ? MINIGAME_INSTAGIB_BOOMFNG : MINIGAME_INSTAGIB_FNG])
-			InstagibTick(i);
-
 	if (IsFullHour())
 	{
-		ExpirePlots();
+		m_Plots.ExpirePlots();
 		ExpireSavedIdentities();
-	}
-
-	// Check if plot destroy is over, player is not wanted anymore as it seems
-	for (int i = PLOT_START; i < Collision()->m_NumPlots + 1; i++)
-	{
-		if (m_aPlots[i].m_DestroyEndTick && !PlotCanBeRaided(i))
-		{
-			// Reset door health
-			m_aPlots[i].m_DestroyEndTick = 0;
-			m_aPlots[i].m_DoorHealth = Config()->m_SvPlotDoorHealth;
-			int AccID = GetAccIDByUsername(m_aPlots[i].m_aOwner);
-			if (AccID >= ACC_START)
-			{
-				int ClientID = m_Accounts[AccID].m_ClientID;
-				if (ClientID >= 0 && m_apPlayers[ClientID])
-				{
-					SendChatTarget(ClientID, m_apPlayers[ClientID]->Localize("Your plot is no longer subject to a search warrant and can no longer be destroyed"));
-				}
-			}
-		}
 	}
 
 	if (m_LastPlayerCountUpdate + Server()->TickSpeed() * 60 < Server()->Tick())
@@ -1576,6 +1693,43 @@ void CGameContext::OnTick()
 		}
 	}
 #endif
+}
+
+void CGameContext::PreInputClients(int ClientId, bool *pClients)
+{
+	if(!pClients || !m_apPlayers[ClientId])
+		return;
+
+	CCharacter *pInputChr = m_apPlayers[ClientId]->GetCharacter();
+	if(!pInputChr || m_apPlayers[ClientId]->GetTeam() == TEAM_SPECTATORS || m_apPlayers[ClientId]->m_Afk)
+		return;
+
+	// Prevent pre inputs when player cant even move. Avoid annoying mispredictions for most common cases
+	// It would be possible to only reset m_Fire for telekinesis for example, but i think it doesnt matter
+	if (pInputChr->m_DrawEditor.Active() || pInputChr->m_pVehicle || pInputChr->m_InSnake || pInputChr->GetActiveWeapon() == WEAPON_TELEKINESIS
+		|| Arenas()->IsConfiguring(ClientId) || Durak()->ActivelyPlaying(ClientId) || m_apPlayers[ClientId]->m_pControlledTee)
+		return;
+
+	for(int Id = 0; Id < MAX_CLIENTS; Id++)
+	{
+		if(ClientId == Id)
+			continue;
+
+		CPlayer *pPlayer = m_apPlayers[Id];
+		if(!pPlayer)
+			continue;
+
+		if(GetClientDDNetVersion(Id) < VERSION_DDNET_PREINPUT)
+			continue;
+
+		if(pPlayer->GetTeam() == TEAM_SPECTATORS || GetDDRaceTeam(ClientId) != GetDDRaceTeam(Id) || pPlayer->m_Afk)
+			continue;
+
+		if(!pInputChr->CanSnapCharacter(Id) || pInputChr->NetworkClipped(Id, true))
+			continue;
+
+		pClients[Id] = true;
+	}
 }
 
 // Server hooks
@@ -1602,6 +1756,19 @@ void CGameContext::OnClientDirectInput(int ClientID, void *pInput)
 
 void CGameContext::OnClientPredictedInput(int ClientID, void *pInput)
 {
+	CNetObj_PlayerInput *pApplyInput = static_cast<CNetObj_PlayerInput *>(pInput);
+
+	if(pApplyInput == nullptr)
+	{
+		// early return if no input at all has been sent by a player
+		if(!m_aPlayerHasInput[ClientID])
+		{
+			return;
+		}
+		// set to last sent input when no new input has been sent
+		pApplyInput = &m_aLastPlayerInput[ClientID];
+	}
+
 	if(!m_World.m_Paused)
 	{
 		int NumFailures = m_NetObjHandler.NumObjFailures();
@@ -1615,14 +1782,38 @@ void CGameContext::OnClientPredictedInput(int ClientID, void *pInput)
 			}
 		}
 		else
-			m_apPlayers[ClientID]->OnPredictedInput((CNetObj_PlayerInput *)pInput);
+		{
+			m_apPlayers[ClientID]->OnPredictedInput(pApplyInput);
+		}
 	}
 }
 
 void CGameContext::OnClientPredictedEarlyInput(int ClientID, void *pInput)
 {
+	CNetObj_PlayerInput *pApplyInput = static_cast<CNetObj_PlayerInput *>(pInput);
+
+	if(pApplyInput == nullptr)
+	{
+		// early return if no input at all has been sent by a player
+		if(!m_aPlayerHasInput[ClientID])
+		{
+			return;
+		}
+		// set to last sent input when no new input has been sent
+		pApplyInput = &m_aLastPlayerInput[ClientID];
+	}
+	else
+	{
+		// Store input in this function and not in `OnClientPredictedInput`,
+		// because this function is called on all inputs, while
+		// `OnClientPredictedInput` is only called on the first input of each
+		// tick.
+		mem_copy(&m_aLastPlayerInput[ClientID], pApplyInput, sizeof(m_aLastPlayerInput[ClientID]));
+		m_aPlayerHasInput[ClientID] = true;
+	}
+
 	if(!m_World.m_Paused)
-		m_apPlayers[ClientID]->OnPredictedEarlyInput((CNetObj_PlayerInput *)pInput);
+		m_apPlayers[ClientID]->OnPredictedEarlyInput(pApplyInput);
 }
 
 struct CVoteOptionServer *CGameContext::GetVoteOption(int Index)
@@ -1653,7 +1844,7 @@ void CGameContext::ProgressVoteOptions(int ClientID)
 		return; // shouldn't happen / fail silently
 
 	int VotesLeft = m_NumVoteOptions - pPl->m_SendVoteIndex;
-	int NumVotesToSend = min(Config()->m_SvVotesPerTick, VotesLeft);
+	int NumVotesToSend = minimum(Config()->m_SvVotesPerTick, VotesLeft);
 
 	if (!VotesLeft)
 	{
@@ -1779,6 +1970,9 @@ void CGameContext::OnClientEnter(int ClientID)
 			return; // kicked
 	}
 
+	mem_zero(&m_aLastPlayerInput[ClientID], sizeof(m_aLastPlayerInput[ClientID]));
+	m_aPlayerHasInput[ClientID] = false;
+
 	SendChatTarget(ClientID, "F-DDrace Mod. Version: " GAME_VERSION ", by fokkonaut");
 	SendChatTarget(ClientID, "for more information, please say '/info'");
 	if (Config()->m_SvWelcome[0] != 0)
@@ -1790,7 +1984,7 @@ void CGameContext::OnClientEnter(int ClientID)
 	SendPlayerCountUpdate();
 
 	// initial chat delay
-	int Seconds = max(Config()->m_SvChatInitialDelay, Config()->m_SvJoinMsgDelay);
+	int Seconds = maximum(Config()->m_SvChatInitialDelay, Config()->m_SvJoinMsgDelay);
 	if(Seconds != 0 && m_apPlayers[ClientID]->m_JoinTick > m_NonEmptySince + 10 * Server()->TickSpeed() && Server()->GetDummy(ClientID) == -1)
 	{
 		char aBuf[128];
@@ -2372,7 +2566,7 @@ void CGameContext::OnMessage(int MsgID, CUnpacker *pUnpacker, int ClientID)
 			if (!Command)
 			{
 				if (Durak()->TryEnterBetStake(ClientID, pMsg->m_pMessage) ||
-					(pPlayer->GetCharacter() && pPlayer->GetCharacter()->m_DrawEditor.TryEnterPresetName(pMsg->m_pMessage)))
+					(pPlayer->GetCharacter() && pPlayer->GetCharacter()->m_DrawEditor.OnChatMessage(pMsg->m_pMessage)))
 				return;
 			}
 
@@ -2464,7 +2658,20 @@ void CGameContext::OnMessage(int MsgID, CUnpacker *pUnpacker, int ClientID)
 				// m_apPlayers[ClientID] can be NULL, if the player used a
 				// timeout code and replaced another client.
 				char aBuf[256];
-				str_format(aBuf, sizeof(aBuf), "%d used %s", ClientID, pMsg->m_pMessage);
+				int Len = -1;
+				if (str_comp_nocase_num(pMsg->m_pMessage + 1, "login ", 6) == 0) Len = 6;
+				if (str_comp_nocase_num(pMsg->m_pMessage + 1, "register ", 9) == 0) Len = 9;
+				if (str_comp_nocase_num(pMsg->m_pMessage + 1, "changepassword ", 15) == 0) Len = 15;
+				if (Len != -1)
+				{
+					char aCmd[32];
+					str_copy(aCmd, pMsg->m_pMessage, Len + 1);
+					str_format(aBuf, sizeof(aBuf), "%d used %s", ClientID, aCmd);
+				}
+				else
+				{
+					str_format(aBuf, sizeof(aBuf), "%d used %s", ClientID, pMsg->m_pMessage);
+				}
 				Console()->Print(IConsole::OUTPUT_LEVEL_DEBUG, "chat-command", aBuf);
 
 				Console()->SetAccessLevel(IConsole::ACCESS_LEVEL_ADMIN);
@@ -2878,7 +3085,23 @@ void CGameContext::OnMessage(int MsgID, CUnpacker *pUnpacker, int ClientID)
 					
 					if (!InHouse)
 					{
-						pChr->DropFlag();
+						IVehicle* pVehicle = pChr->m_pVehicle;
+						if (pVehicle)
+						{
+							if (pChr->CanSwitchSeats())
+							{
+								int switchSeat = pVehicle->GetNextAvailableSeat(pChr->m_VehicleSeat);
+								if (switchSeat != -1)
+								{
+									pVehicle->Dismount(ClientID, false);
+									pVehicle->Mount(ClientID, switchSeat);
+								}
+							}
+						}
+						else
+						{
+							pChr->DropFlag();
+						}
 					}
 				}
 			}
@@ -2903,11 +3126,11 @@ void CGameContext::OnMessage(int MsgID, CUnpacker *pUnpacker, int ClientID)
 
 					if (!InHouse)
 					{
-						if (pChr->m_pHelicopter)
+						if (pChr->m_pVehicle)
 						{
-							pChr->m_pHelicopter->Dismount();
+							pChr->m_pVehicle->Dismount(ClientID);
 						}
-						else if (!pChr->TryMountHelicopter() && !pChr->DropGrog())
+						else if (!pChr->DropGrog() && !pChr->TryMountVehicle())
 						{
 							pChr->DropWeapon(pChr->GetActiveWeaponUnclamped(), false);
 						}
@@ -3048,12 +3271,15 @@ void CGameContext::OnMessage(int MsgID, CUnpacker *pUnpacker, int ClientID)
 			if(Config()->m_SvSpamprotection && pPlayer->m_LastEmote && pPlayer->m_LastEmote+Server()->TickSpeed()*Config()->m_SvEmoticonDelay > Server()->Tick())
 				return;
 
-			pPlayer->UpdatePlaytime();
-			pPlayer->m_LastEmote = Server()->Tick();
+			// On 0.6 local client can be changed, allow emoticons from controller tee
+			CPlayer *pProcessed = pPlayer->m_pControlledTee ? pPlayer->m_pControlledTee : pPlayer;
 
-			SendEmoticon(ClientID, pMsg->m_Emoticon);
-			CCharacter *pChr = pPlayer->GetCharacter();
-			if(pChr && Config()->m_SvEmotionalTees && pPlayer->m_EyeEmote)
+			pProcessed->UpdatePlaytime();
+			pProcessed->m_LastEmote = Server()->Tick();
+
+			SendEmoticon(pProcessed->GetCID(), pMsg->m_Emoticon);
+			CCharacter *pChr = pProcessed->GetCharacter();
+			if(pChr && Config()->m_SvEmotionalTees && pProcessed->m_EyeEmote)
 			{
 				switch(pMsg->m_Emoticon)
 				{
@@ -3087,7 +3313,7 @@ void CGameContext::OnMessage(int MsgID, CUnpacker *pUnpacker, int ClientID)
 						pChr->SetEmoteType(EMOTE_NORMAL);
 						break;
 				}
-				if (pPlayer->m_SpookyGhost)
+				if (pProcessed->m_SpookyGhost)
 					pChr->SetEmoteType(EMOTE_SURPRISE);
 				else if (pChr->GetActiveWeapon() == WEAPON_HEART_GUN)
 					pChr->SetEmoteType(EMOTE_HAPPY);
@@ -3169,7 +3395,7 @@ void CGameContext::OnMessage(int MsgID, CUnpacker *pUnpacker, int ClientID)
 			else
 			{
 				if (pChr->m_LastWantedLogout && pChr->m_LastWantedLogout + Server()->TickSpeed() * Config()->m_SvKillLogout > Server()->Tick())
-					Logout(pPlayer->GetAccID());
+					m_Accounts.Logout(pPlayer->GetAccID());
 
 				pPlayer->m_ToggleSpawn = pPlayer->m_PlayerFlags&PLAYERFLAG_SCOREBOARD;
 				pPlayer->KillCharacter(WEAPON_SELF);
@@ -3192,6 +3418,13 @@ void CGameContext::OnMessage(int MsgID, CUnpacker *pUnpacker, int ClientID)
 		{
 			if(pPlayer->m_LastChangeInfo && pPlayer->m_LastChangeInfo+Server()->TickSpeed()*Config()->m_SvInfoChangeDelay > Server()->Tick())
 				return;
+
+			if(Config()->m_SvSpamprotection)
+			{
+				CNetMsg_Sv_ChangeInfoCooldown ChangeInfoCooldownMsg;
+				ChangeInfoCooldownMsg.m_WaitUntil = Server()->Tick() + Server()->TickSpeed() * Config()->m_SvInfoChangeDelay;
+				Server()->SendPackMsg(&ChangeInfoCooldownMsg, MSGFLAG_VITAL | MSGFLAG_NORECORD, ClientID);
+			}
 
 			pPlayer->UpdatePlaytime();
 			pPlayer->m_LastChangeInfo = Server()->Tick();
@@ -3246,6 +3479,11 @@ void CGameContext::OnMessage(int MsgID, CUnpacker *pUnpacker, int ClientID)
 		{
 			CNetMsg_Cl_CameraInfo *pMsg = (CNetMsg_Cl_CameraInfo *)pRawMsg;
 			pPlayer->m_CameraInfo.Write(pMsg);
+		}
+		else if (MsgID == NETMSGTYPE_CL_ENABLESPECTATORCOUNT)
+		{
+			CNetMsg_Cl_EnableSpectatorCount *pMsg = (CNetMsg_Cl_EnableSpectatorCount *)pRawMsg;
+			pPlayer->m_EnableSpectatorCount = pMsg->m_Enable;
 		}
 	}
 	else
@@ -3330,7 +3568,7 @@ void CGameContext::ConToggleTuneParam(IConsole::IResult* pResult, void* pUserDat
 		return;
 	}
 
-	float NewValue = fabs(OldValue - pResult->GetFloat(1)) < 0.0001f
+	float NewValue = absolute(OldValue - pResult->GetFloat(1)) < 0.0001f
 		? pResult->GetFloat(2)
 		: pResult->GetFloat(1);
 
@@ -3358,7 +3596,7 @@ void CGameContext::ConTunes(IConsole::IResult* pResult, void* pUserData)
 		float Value;
 		pSelf->Tuning()->Get(i, &Value);
 		str_format(aBuf, sizeof(aBuf), "%s %.2f", pSelf->Tuning()->ms_apNames[i], Value);
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "tuning", aBuf);
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "tuning", aBuf);
 	}
 }
 
@@ -3371,7 +3609,7 @@ void CGameContext::ConTuneZone(IConsole::IResult* pResult, void* pUserData)
 	char aBuf[256];
 	float Value;
 
-	if (List >= 0 && List < NUM_TUNEZONES)
+	if (List >= 0 && List < TuneZone::NUM)
 	{
 		if (NewValue != -1 && pSelf->TuningList()[List].Set(pParamName, NewValue))
 		{
@@ -3394,14 +3632,14 @@ void CGameContext::ConTuneDumpZone(IConsole::IResult* pResult, void* pUserData)
 	CGameContext* pSelf = (CGameContext*)pUserData;
 	int List = pResult->GetInteger(0);
 	char aBuf[256];
-	if (List >= 0 && List < NUM_TUNEZONES)
+	if (List >= 0 && List < TuneZone::NUM)
 	{
 		for (int i = 0; i < pSelf->TuningList()[List].Num(); i++)
 		{
 			float v;
 			pSelf->TuningList()[List].Get(i, &v);
 			str_format(aBuf, sizeof(aBuf), "zone %d: %s %.2f", List, pSelf->TuningList()[List].ms_apNames[i], v);
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "tuning", aBuf);
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "tuning", aBuf);
 		}
 	}
 }
@@ -3413,7 +3651,7 @@ void CGameContext::ConTuneResetZone(IConsole::IResult* pResult, void* pUserData)
 	if (pResult->NumArguments())
 	{
 		int List = pResult->GetInteger(0);
-		if (List >= 0 && List < NUM_TUNEZONES)
+		if (List >= 0 && List < TuneZone::NUM)
 		{
 			pSelf->TuningList()[List] = TuningParams;
 			char aBuf[256];
@@ -3424,7 +3662,7 @@ void CGameContext::ConTuneResetZone(IConsole::IResult* pResult, void* pUserData)
 	}
 	else
 	{
-		for (int i = 0; i < NUM_TUNEZONES; i++)
+		for (int i = 0; i < TuneZone::NUM; i++)
 		{
 			*(pSelf->TuningList() + i) = TuningParams;
 			pSelf->SendTuningParams(-1, i);
@@ -3439,7 +3677,7 @@ void CGameContext::ConTuneSetZoneMsgEnter(IConsole::IResult* pResult, void* pUse
 	if (pResult->NumArguments())
 	{
 		int List = pResult->GetInteger(0);
-		if (List >= 0 && List < NUM_TUNEZONES)
+		if (List >= 0 && List < TuneZone::NUM)
 		{
 			str_copy(pSelf->m_aaZoneEnterMsg[List], pResult->GetString(1), sizeof(pSelf->m_aaZoneEnterMsg[List]));
 		}
@@ -3452,7 +3690,7 @@ void CGameContext::ConTuneSetZoneMsgLeave(IConsole::IResult* pResult, void* pUse
 	if (pResult->NumArguments())
 	{
 		int List = pResult->GetInteger(0);
-		if (List >= 0 && List < NUM_TUNEZONES)
+		if (List >= 0 && List < TuneZone::NUM)
 		{
 			str_copy(pSelf->m_aaZoneLeaveMsg[List], pResult->GetString(1), sizeof(pSelf->m_aaZoneLeaveMsg[List]));
 		}
@@ -3466,18 +3704,67 @@ void CGameContext::ConTuneLock(IConsole::IResult *pResult, void *pUserData)
 	const char *pParamName = pResult->GetString(1);
 	float NewValue = pResult->GetFloat(2);
 
-	if(List >= 0 && List < NUM_TUNEZONES)
+	if(List >= 0 && List < TuneZone::NUM)
 	{
 		CLockedTune LockedTune(pParamName, NewValue);
-		if(pSelf->SetLockedTune(&pSelf->LockedTuning()[List], LockedTune))
+		char aBuf[256];
+		int Result = pSelf->SetLockedTune(&pSelf->LockedTuning()[List], LockedTune, true);
+		if(Result == 3)
 		{
-			char aBuf[256];
-			str_format(aBuf, sizeof(aBuf), "%s for lock %d changed to %.2f", pParamName, List, NewValue);
+			str_format(aBuf, sizeof(aBuf), "Reset '%s' for lock %d", pParamName, List);
 			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "tuning", aBuf);
-			pSelf->SendTuningParams(-1);
+		}
+		else if(Result)
+		{
+			str_format(aBuf, sizeof(aBuf), "'%s' for lock %d changed to %.2f", pParamName, List, NewValue);
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "tuning", aBuf);
 		}
 		else
 			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "tuning", "No such tuning parameter");
+	}
+}
+
+void CGameContext::ConTuneLockReset(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int List = pResult->GetInteger(0);
+
+	LOCKED_TUNES *pLockedTunings = &pSelf->LockedTuning()[List];
+
+	char aBuf[256];
+	if (pResult->NumArguments() == 1)
+	{
+		pLockedTunings->clear();
+		pSelf->m_aaTuneLockMsg[List][0] = 0;
+		if (List == 0)
+			str_copy(aBuf, "Reset enter message for lock reset", sizeof(aBuf));
+		else
+			str_format(aBuf, sizeof(aBuf), "Reset all locked tunings and enter message for lock %d", List);
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "tuning", aBuf);
+		return;
+	}
+
+	const char *pParam = pResult->GetString(1);
+
+	float GlobalValue;
+	if (!pSelf->m_Tuning.Get(pParam, &GlobalValue))
+	{
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "tuning", "No such tuning parameter");
+		return;
+	}
+
+	if (!pSelf->IsTuneInList(pLockedTunings, pParam))
+	{
+		str_format(aBuf, sizeof(aBuf), "'%s' is not in lock list %d", pParam, List);
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "tuning", aBuf);
+		return;
+	}
+
+	CLockedTune Tune(pParam, GlobalValue);
+	if (pSelf->SetLockedTune(pLockedTunings, Tune) == 3)
+	{
+		str_format(aBuf, sizeof(aBuf), "Reset '%s' for lock %d", pParam, List);
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "tuning", aBuf);
 	}
 }
 
@@ -3486,12 +3773,12 @@ void CGameContext::ConTuneLockDump(IConsole::IResult *pResult, void *pUserData)
 	CGameContext *pSelf = (CGameContext *)pUserData;
 	int List = pResult->GetInteger(0);
 	char aBuf[256];
-	if(List >= 0 && List < NUM_TUNEZONES)
+	if(List >= 0 && List < TuneZone::NUM)
 	{
 		for(unsigned int i = 0; i < pSelf->LockedTuning()[List].size(); i++)
 		{
-			str_format(aBuf, sizeof(aBuf), "lock %d: %s %.2f", List, pSelf->LockedTuning()[List][i].m_aParam, pSelf->LockedTuning()[List][i].m_Value);
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "tuning", aBuf);
+			str_format(aBuf, sizeof(aBuf), "lock %d: %s %.2f", List, pSelf->LockedTuning()[List][i].m_aParam, (float)pSelf->LockedTuning()[List][i].m_Value);
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "tuning", aBuf);
 		}
 	}
 }
@@ -3502,7 +3789,7 @@ void CGameContext::ConTuneLockSetMsgEnter(IConsole::IResult *pResult, void *pUse
 	if(pResult->NumArguments())
 	{
 		int List = pResult->GetInteger(0);
-		if(List >= 0 && List < NUM_TUNEZONES)
+		if(List >= 0 && List < TuneZone::NUM)
 		{
 			str_copy(pSelf->m_aaTuneLockMsg[List], pResult->GetString(1), sizeof(pSelf->m_aaTuneLockMsg[List]));
 		}
@@ -3552,6 +3839,37 @@ void CGameContext::ConBroadcast(IConsole::IResult* pResult, void* pUserData)
 {
 	CGameContext *pSelf = (CGameContext *)pUserData;
 	pSelf->SendBroadcast(pResult->GetString(0), -1);
+}
+
+void CGameContext::ConServerAlert(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	char aBuf[1024];
+	str_copy(aBuf, pResult->GetString(0), sizeof(aBuf));
+	UnescapeNewlines(aBuf);
+
+	pSelf->SendServerAlert(aBuf);
+}
+
+void CGameContext::ConModAlert(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	const int Victim = pResult->GetVictim();
+	if(Victim < 0 || Victim >= MAX_CLIENTS || !pSelf->m_apPlayers[Victim])
+	{
+		char aLogMsg[128];
+		str_format(aLogMsg, sizeof(aLogMsg), "Client ID not found: %d", Victim);
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "moderator_alert", aLogMsg);
+		return;
+	}
+
+	char aBuf[1024];
+	str_copy(aBuf, pResult->GetString(1), sizeof(aBuf));
+	UnescapeNewlines(aBuf);
+
+	pSelf->SendModeratorAlert(aBuf, Victim);
 }
 
 void CGameContext::ConSetTeam(IConsole::IResult *pResult, void *pUserData)
@@ -3614,7 +3932,7 @@ void CGameContext::ConForceVote(IConsole::IResult *pResult, void *pUserData)
 		if(!pOption)
 		{
 			str_format(aBuf, sizeof(aBuf), "'%s' isn't an option on this server", pValue);
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "server", aBuf);
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "server", aBuf);
 			return;
 		}
 	}
@@ -3625,21 +3943,21 @@ void CGameContext::ConForceVote(IConsole::IResult *pResult, void *pUserData)
 			return;
 		if(KickID < 0 || KickID >= MAX_CLIENTS || !pSelf->m_apPlayers[KickID])
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "server", "Invalid client id to kick");
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "server", "Invalid client id to kick");
 			return;
 		}
 
 		if(!pSelf->Config()->m_SvVoteKickBantime)
 		{
 			str_format(aBuf, sizeof(aBuf), "kick %d %s", KickID, pReason);
-			pSelf->Console()->ExecuteLine(aBuf);
+			pSelf->Console()->ExecuteLine(aBuf, IConsole::CLIENT_ID_UNSPECIFIED, false);
 		}
 		else
 		{
 			char aAddrStr[NETADDR_MAXSTRSIZE] = {0};
 			pSelf->Server()->GetClientAddr(KickID, aAddrStr, sizeof(aAddrStr));
 			str_format(aBuf, sizeof(aBuf), "ban %s %d %s", aAddrStr, pSelf->Config()->m_SvVoteKickBantime, pReason);
-			pSelf->Console()->ExecuteLine(aBuf);
+			pSelf->Console()->ExecuteLine(aBuf, IConsole::CLIENT_ID_UNSPECIFIED, false);
 		}
 	}
 	else if(str_comp_nocase(pType, "spectate") == 0)
@@ -3649,13 +3967,13 @@ void CGameContext::ConForceVote(IConsole::IResult *pResult, void *pUserData)
 			return;
 		if(SpectateID < 0 || SpectateID >= MAX_CLIENTS || !pSelf->m_apPlayers[SpectateID] || pSelf->m_apPlayers[SpectateID]->GetTeam() == TEAM_SPECTATORS)
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "server", "Invalid client id to move");
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "server", "Invalid client id to move");
 			return;
 		}
 
 		pSelf->SendChatFormat(-1, CHAT_ALL, -1, CGameContext::CHATFLAG_ALL, Localizable("'%s' was moved to spectator (%s)"), pSelf->Server()->ClientName(SpectateID), pReason);
 		str_format(aBuf, sizeof(aBuf), "set_team %d -1 %d", SpectateID, pSelf->Config()->m_SvVoteSpectateRejoindelay);
-		pSelf->Console()->ExecuteLine(aBuf);
+		pSelf->Console()->ExecuteLine(aBuf, IConsole::CLIENT_ID_UNSPECIFIED, false);
 	}
 }
 
@@ -3747,7 +4065,7 @@ void CGameContext::ConRemoveVote(IConsole::IResult *pResult, void *pUserData)
 	{
 		char aBuf[256];
 		str_format(aBuf, sizeof(aBuf), "option '%s' does not exist", pDescription);
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "server", aBuf);
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "server", aBuf);
 		return;
 	}
 
@@ -3937,13 +4255,16 @@ void CGameContext::OnConsoleInit()
 	Console()->Register("tune_zone_enter", "i[zone] s[message]", CFGFLAG_SERVER|CFGFLAG_GAME, ConTuneSetZoneMsgEnter, this, "which message to display on zone enter; use 0 for normal area", AUTHED_ADMIN);
 	Console()->Register("tune_zone_leave", "i[zone] s[message]", CFGFLAG_SERVER|CFGFLAG_GAME, ConTuneSetZoneMsgLeave, this, "which message to display on zone leave; use 0 for normal area", AUTHED_ADMIN);
 	Console()->Register("tune_lock", "i[number] s[tuning] i[value]", CFGFLAG_SERVER | CFGFLAG_GAME, ConTuneLock, this, "Tune for lock a variable to value", AUTHED_ADMIN);
-	Console()->Register("tune_lock_dump", "i[number]", CFGFLAG_SERVER, ConTuneLockDump, this, "Dump lock tuning for number x", AUTHED_ADMIN);
+	Console()->Register("tune_lock_reset", "i[number] ?s[tuning]", CFGFLAG_SERVER, ConTuneLockReset, this, "Reset a specific locked tuning variable to default for lock i or all and enter message", AUTHED_ADMIN);
+	Console()->Register("tune_lock_dump", "i[number]", CFGFLAG_SERVER, ConTuneLockDump, this, "Dump lock tuning for number x", AUTHED_HELPER);
 	Console()->Register("tune_lock_enter", "i[number] r[message]", CFGFLAG_SERVER | CFGFLAG_GAME, ConTuneLockSetMsgEnter, this, "which message to display on tune lock enter; use 0 for lock reset", AUTHED_ADMIN);
 	Console()->Register("switch_open", "i[switch]", CFGFLAG_SERVER|CFGFLAG_GAME, ConSwitchOpen, this, "Whether a switch is deactivated by default (otherwise activated)", AUTHED_ADMIN);
 
 	Console()->Register("pausegame", "?i[on/off]", CFGFLAG_SERVER|CFGFLAG_STORE, ConPause, this, "Pause/unpause game", AUTHED_ADMIN);
 	Console()->Register("change_map", "?r[map]", CFGFLAG_SERVER|CFGFLAG_STORE, ConChangeMap, this, "Change map", AUTHED_ADMIN);
 	Console()->Register("restart", "?i[seconds]", CFGFLAG_SERVER|CFGFLAG_STORE, ConRestart, this, "Restart in x seconds (0 = abort)", AUTHED_ADMIN);
+	Console()->Register("server_alert", "r[message]", CFGFLAG_SERVER, ConServerAlert, this, "Send a server alert message to all players", AUTHED_ADMIN);
+	Console()->Register("mod_alert", "v[id] r[message]", CFGFLAG_SERVER, ConModAlert, this, "Send a moderator alert message to player", AUTHED_MOD);
 	Console()->Register("say", "r[message]", CFGFLAG_SERVER, ConSay, this, "Say in chat", AUTHED_MOD);
 	Console()->Register("broadcast", "r[message]", CFGFLAG_SERVER, ConBroadcast, this, "Broadcast message", AUTHED_MOD);
 	Console()->Register("set_team", "i[id] i[team-id] ?i[delay in minutes]", CFGFLAG_SERVER, ConSetTeam, this, "Set team of player to team", AUTHED_ADMIN);
@@ -4082,8 +4403,6 @@ void CGameContext::OnInit()
 	Console()->SetIsDummyCallback(ConsoleIsDummyCallback, this);
 	Console()->SetIsInViewCallback(ConsoleIsInViewCallback, this);
 
-	DeleteTempfile();
-
 	// HACK: only set static size for items, which were available in the first 0.7 release
 	// so new items don't break the snapshot delta
 	static const int OLD_NUM_NETOBJTYPES = 23;
@@ -4094,12 +4413,12 @@ void CGameContext::OnInit()
 	m_Collision.Init(&m_Layers, m_pConfig);
 
 	// reset tune locks
-	for(int i = 0; i < NUM_TUNEZONES; i++)
+	for(int i = 0; i < TuneZone::NUM; i++)
 		LockedTuning()[i].clear();
 
 	// Reset Tunezones
 	CTuningParams TuningParams;
-	for (int i = 0; i < NUM_TUNEZONES; i++)
+	for (int i = 0; i < TuneZone::NUM; i++)
 	{
 		TuningList()[i] = TuningParams;
 		TuningList()[i].Set("gun_curvature", 0);
@@ -4108,7 +4427,7 @@ void CGameContext::OnInit()
 		TuningList()[i].Set("shotgun_speed", 500);
 	}
 
-	for (int i = 0; i < NUM_TUNEZONES; i++)
+	for (int i = 0; i < TuneZone::NUM; i++)
 	{
 		// Send no text by default when changing tune zones.
 		m_aaZoneEnterMsg[i][0] = 0;
@@ -4214,7 +4533,7 @@ void CGameContext::OnInit()
 		Tuning()->Set("player_collision", 0);
 		Tuning()->Set("player_hooking", 0);
 
-		for (int i = 0; i < NUM_TUNEZONES; i++)
+		for (int i = 0; i < TuneZone::NUM; i++)
 		{
 			TuningList()[i].Set("player_collision", 0);
 			TuningList()[i].Set("player_hooking", 0);
@@ -4366,26 +4685,16 @@ void CGameContext::FDDraceInitPreMapInit()
 	Collision()->m_vRedirectTiles.clear();
 
 	// reset plots here but load them after the map init
-	for (int i = 0; i < MAX_PLOTS; i++)
-	{
-		m_aPlots[i].m_aOwner[0] = 0;
-		m_aPlots[i].m_aDisplayName[0] = 0;
-		m_aPlots[i].m_ExpireDate = 0;
-		m_aPlots[i].m_Size = 0;
-		m_aPlots[i].m_ToTele = vec2(-1, -1);
-		m_aPlots[i].m_vObjects.clear();
-		m_aPlots[i].m_DestroyEndTick = 0;
-		m_aPlots[i].m_DoorHealth = Config()->m_SvPlotDoorHealth;
-	}
+	m_Plots.Init(this);
 
 	// Durak has to be initialized before the map initialization
 	for (int i = 0; i < NUM_MINIGAMES; i++)
 		if (m_pMinigames[i])
 			delete m_pMinigames[i];
 	m_pMinigames[MINIGAME_BLOCK] = new CMinigame(this, MINIGAME_BLOCK);
-	m_pMinigames[MINIGAME_SURVIVAL] = new CMinigame(this, MINIGAME_SURVIVAL);
-	m_pMinigames[MINIGAME_1VS1] = new CArenas(this, MINIGAME_1VS1);
-	m_pMinigames[MINIGAME_DURAK] = new CDurak(this, MINIGAME_DURAK);
+	m_pMinigames[MINIGAME_SURVIVAL] = new CSurvival(this);
+	m_pMinigames[MINIGAME_1VS1] = new CArenas(this);
+	m_pMinigames[MINIGAME_DURAK] = new CDurak(this);
 	m_pMinigames[MINIGAME_INSTAGIB_BOOMFNG] = new CMinigame(this, MINIGAME_INSTAGIB_BOOMFNG);
 	m_pMinigames[MINIGAME_INSTAGIB_FNG] = new CMinigame(this, MINIGAME_INSTAGIB_FNG);
 
@@ -4436,24 +4745,16 @@ void CGameContext::FDDraceInit()
 
 	CreateFolders();
 
-	AddAccount(); // account id 0 means not logged in, so we add an unused account with id 0
-	m_LogoutAccountsPort = Config()->m_SvPort; // set before calling InitAccounts
-	Storage()->ListDirectory(IStorage::TYPE_ALL, Config()->m_SvAccFilePath, InitAccounts, this);
-	LazySaveTopAccounts();
+	m_Accounts.Init(this);
 
 	// load plot data AFTER map init
-	for (int i = 0; i < Collision()->m_NumPlots + 1; i++)
-			ReadPlotStats(i);
-	ExpirePlots();
+	m_Plots.LoadData();
 
 	if (Config()->m_SvBansFile[0])
 		Console()->ExecuteFile(Config()->m_SvBansFile);
 	if (Config()->m_SvWhitelistFile[0])
 		Console()->ExecuteFile(Config()->m_SvWhitelistFile);
 
-	m_LastDataSaveTick = Server()->Tick();
-
-	ReadMoneyListFile();
 	ReadSavedPlayersFile();
 	ExpireSavedIdentities();
 
@@ -4469,24 +4770,6 @@ void CGameContext::FDDraceInit()
 		m_FullHourOffsetTicks = (Seconds * Server()->TickSpeed()) + (Minutes * 60 * Server()->TickSpeed());
 	}
 
-	int64 aNeededXP[] = { 5000, 15000, 25000, 35000, 50000, 65000, 80000, 100000, 120000, 130000, 160000, 200000, 240000, 280000, 325000, 370000, 420000, 470000, 520000, 600000,
-	680000, 760000, 850000, 950000, 1200000, 1400000, 1600000, 1800000, 2000000, 2210000, 2430000, 2660000, 2900000, 3150000, 3500000, 3950000, 4500000, 5250000, 6100000, 7000000,
-	8000000, 9000000, 10000000, 11000000, 12000000, 13000000, 14000000, 15000000, 16000000, 17000000, 18000000, 19000000, 20000000, 21000000, 22000000, 23000000, 24000000, 25000000,
-	26000000, 27000000, 28000000, 29000000, 30000000, 31000000, 32000000, 33000000, 34000000, 35000000, 36000000, 37000000, 38000000, 39000000, 40000000, 41010000, 42020000, 43030000,
-	44040000, 45050000, 46060000, 47070000, 48080000, 49090000, 50100000, 51110000, 52120000, 53130000, 54140000, 55150000, 56160000, 57170000, 58180000, 59190000, 60200000, 61300000,
-	62400000, 63500000, 64600000, 65700000, 66800000, 68000000 };
-
-	for (int i = 0; i < DIFFERENCE_XP_END; i++)
-		m_aNeededXP[i] = aNeededXP[i];
-
-	int aTaserPrice[] = { 50000, 75000, 100000, 150000, 200000, 200000, 200000, 300000, 300000, 400000 };
-	for (int i = 0; i < NUM_TASER_LEVELS; i++)
-		m_aTaserPrice[i] = aTaserPrice[i];
-
-	int aPoliceLevel[] = { 18, 25, 30, 40, 50 };
-	for (int i = 0; i < NUM_POLICE_LEVELS; i++)
-		m_aPoliceLevel[i] = aPoliceLevel[i];
-
 	for (int i = 0; i < NUM_HOUSES; i++)
 		if (m_pHouses[i])
 			delete m_pHouses[i];
@@ -4497,11 +4780,6 @@ void CGameContext::FDDraceInit()
 
 	m_WhoIs.Init(this);
 	m_RainbowName.Init(this);
-
-	m_SurvivalGameState = SURVIVAL_OFFLINE;
-	m_SurvivalBackgroundState = SURVIVAL_OFFLINE;
-	m_SurvivalTick = 0;
-	m_SurvivalWinner = -1;
 
 	SetMapSpecificOptions();
 	if (Config()->m_SvDefaultDummies)
@@ -4514,138 +4792,8 @@ void CGameContext::FDDraceInit()
 			ConnectHouseDummy(i, true);
 	}
 
-	char aPath[IO_MAX_PATH_LENGTH];
-	str_format(aPath, sizeof(aPath), "%s/presets", Config()->m_SvPlotFilePath);
-	Storage()->ListDirectory(IStorage::TYPE_ALL, aPath, LoadPresetListCallback, this);
-
 	m_LastPlayerCountUpdate = 0;
 	SendPlayerCountUpdate();
-}
-
-void CGameContext::DeleteTempfile()
-{
-	if (m_aDeleteTempfile[0] != 0)
-	{
-		Storage()->RemoveFile(m_aDeleteTempfile, IStorage::TYPE_SAVE);
-		m_aDeleteTempfile[0] = 0;
-	}
-}
-
-void CGameContext::OnMapChange(char* pNewMapName, int MapNameSize)
-{
-	char aConfig[128];
-	char aTemp[128];
-	str_format(aConfig, sizeof(aConfig), "maps/%s.cfg", Config()->m_SvMap);
-	str_format(aTemp, sizeof(aTemp), "%s.temp.%d", pNewMapName, pid());
-
-	CLineReader LineReader;
-	if (!LineReader.OpenFile(Storage()->OpenFile(aConfig, IOFLAG_READ, IStorage::TYPE_ALL)))
-	{
-		// No map-specific config, just return.
-		return;
-	}
-
-	std::vector<const char *> vpLines;
-	int TotalLength = 0;
-	while(const char *pLine = LineReader.Get())
-	{
-		vpLines.push_back(pLine);
-		TotalLength += str_length(pLine) + 1;
-	}
-
-	char* pSettings = (char*)malloc(TotalLength);
-	int Offset = 0;
-	for(const char *pLine : vpLines)
-	{
-		int Length = str_length(pLine) + 1;
-		mem_copy(pSettings + Offset, pLine, Length);
-		Offset += Length;
-	}
-
-	CDataFileReader Reader;
-	Reader.Open(Storage(), pNewMapName, IStorage::TYPE_ALL);
-
-	CDataFileWriter Writer;
-	Writer.Init();
-
-	int SettingsIndex = Reader.NumData();
-	bool FoundInfo = false;
-	for (int i = 0; i < Reader.NumItems(); i++)
-	{
-		int TypeID;
-		int ItemID;
-		int* pData = (int*)Reader.GetItem(i, &TypeID, &ItemID);
-		int Size = Reader.GetItemSize(i);
-		CMapItemInfoSettings MapInfo;
-		if (TypeID == MAPITEMTYPE_INFO && ItemID == 0)
-		{
-			FoundInfo = true;
-			CMapItemInfoSettings* pInfo = (CMapItemInfoSettings*)pData;
-			if (Size >= (int)sizeof(CMapItemInfoSettings))
-			{
-				if (pInfo->m_Settings > -1)
-				{
-					SettingsIndex = pInfo->m_Settings;
-					char* pMapSettings = (char*)Reader.GetData(SettingsIndex);
-					int DataSize = Reader.GetDataSize(SettingsIndex);
-					if (DataSize == TotalLength && mem_comp(pSettings, pMapSettings, DataSize) == 0)
-					{
-						// Configs coincide, no need to update map.
-						return;
-					}
-					Reader.UnloadData(pInfo->m_Settings);
-				}
-				else
-				{
-					MapInfo = *pInfo;
-					MapInfo.m_Settings = SettingsIndex;
-					pData = (int*)& MapInfo;
-					Size = sizeof(MapInfo);
-				}
-			}
-			else
-			{
-				*(CMapItemInfo*)& MapInfo = *(CMapItemInfo*)pInfo;
-				MapInfo.m_Settings = SettingsIndex;
-				pData = (int*)& MapInfo;
-				Size = sizeof(MapInfo);
-			}
-		}
-		Writer.AddItem(TypeID, ItemID, Size, pData);
-	}
-
-	if (!FoundInfo)
-	{
-		CMapItemInfoSettings Info;
-		Info.m_Version = 1;
-		Info.m_Author = -1;
-		Info.m_MapVersion = -1;
-		Info.m_Credits = -1;
-		Info.m_License = -1;
-		Info.m_Settings = SettingsIndex;
-		Writer.AddItem(MAPITEMTYPE_INFO, 0, sizeof(Info), &Info);
-	}
-
-	for (int i = 0; i < Reader.NumData() || i == SettingsIndex; i++)
-	{
-		if (i == SettingsIndex)
-		{
-			Writer.AddData(TotalLength, pSettings);
-			continue;
-		}
-		unsigned char* pData = (unsigned char*)Reader.GetData(i);
-		int Size = Reader.GetDataSize(i);
-		Writer.AddData(Size, pData);
-		Reader.UnloadData(i);
-	}
-
-	dbg_msg("mapchange", "imported settings");
-	Reader.Close();
-	Writer.OpenFile(Storage(), aTemp);
-	Writer.Finish();
-
-	str_copy(pNewMapName, aTemp, MapNameSize);
-	str_copy(m_aDeleteTempfile, aTemp, sizeof(m_aDeleteTempfile));
 }
 
 void CGameContext::OnPreShutdown()
@@ -4658,6 +4806,8 @@ void CGameContext::OnPreShutdown()
 			continue;
 
 		Durak()->OnPlayerLeave(i, false, true);
+		Arenas()->OnPlayerLeave(i, false, true);
+		Survival()->OnPlayerLeave(i, false, true);
 
 		// Move all money from wallet to bank
 		if (pPlayer->GetAccID() >= ACC_START)
@@ -4671,7 +4821,7 @@ void CGameContext::OnPreShutdown()
 			// Either save the character and it's money or simply drop the money so it can get loaded on next server start
 			if (Config()->m_SvShutdownSaveTees)
 			{
-				SaveCharacter(i, SAVE_WALLET|SAVE_FLAG, Config()->m_SvShutdownSaveTeeExpire);
+				SaveCharacter(i, SAVE_WALLET|SAVE_FLAG|SAVE_SHUTDOWN, Config()->m_SvShutdownSaveTeeExpire);
 			}
 			else
 			{
@@ -4702,11 +4852,8 @@ void CGameContext::OnPreShutdown()
 		}
 	}
 
-	SaveCurrentTopAccounts();
-	LogoutAllAccounts();
-	for (int i = 0; i < Collision()->m_NumPlots + 1; i++)
-		WritePlotStats(i);
-	WriteMoneyListFile();
+	m_Accounts.WriteData();
+	m_Plots.WriteData();
 
 	if (Config()->m_SvBansFile[0])
 	{
@@ -4714,7 +4861,7 @@ void CGameContext::OnPreShutdown()
 		str_format(aBuf, sizeof(aBuf), "bans_save \"%s\"", Config()->m_SvBansFile);
 		Console()->ExecuteLine(aBuf);
 	}
-	Server()->SaveWhitelist();
+	Server()->SaveWhitelist(Config()->m_SvWhitelistFile);
 	SendPlayerCountUpdate(true);
 
 	if (ServerIsStopping && Config()->m_SvShutdownAutoReconnect == 2 && Config()->m_SvShutdownSaveTees)
@@ -4737,7 +4884,6 @@ void CGameContext::OnShutdown(bool FullShutdown)
 		io_close(m_TeeHistorianFile);
 	}
 
-	DeleteTempfile();
 	Console()->ResetServerGameSettings();
 	Collision()->Dest();
 	delete m_pController;
@@ -4784,6 +4930,12 @@ void CGameContext::LoadMapSettings()
 	char aBuf[128];
 	str_format(aBuf, sizeof(aBuf), "maps/%s.map.cfg", Config()->m_SvMap);
 	Console()->ExecuteFile(aBuf, IConsole::CLIENT_ID_NO_GAME);
+
+	if (Config()->m_SvLoadMapConfigFile)
+	{
+		// Execute as id game, (map settings) anyways, removed OnMapChange settings import logic. Use cfg file for overrides
+		Console()->ExecuteFile(aBuf, IConsole::CLIENT_ID_GAME);
+	}
 }
 
 void CGameContext::OnSnap(int ClientID)
@@ -4819,9 +4971,10 @@ void CGameContext::OnSnap(int ClientID)
 void CGameContext::OnPreSnap() {}
 void CGameContext::OnPostSnap()
 {
-	Durak()->PostSnap();
-	m_World.PostSnap();
+	// Call m_Events.Clear() before PostSnap to switch the buffer
 	m_Events.Clear();
+	m_World.PostSnap();
+	Durak()->PostSnap();
 }
 
 bool CGameContext::IsClientBot(int ClientID) const
@@ -4857,7 +5010,7 @@ void CGameContext::SendChatResponseAll(const char* pLine, void* pUser)
 {
 	CGameContext* pSelf = (CGameContext*)pUser;
 
-	static volatile int ReentryGuard = 0;
+	static int ReentryGuard = 0;
 	const char* pLineOrig = pLine;
 
 	if (ReentryGuard)
@@ -4884,7 +5037,7 @@ void CGameContext::SendChatResponse(const char* pLine, void* pUser, bool Highlig
 
 	const char* pLineOrig = pLine;
 
-	static volatile int ReentryGuard = 0;
+	static int ReentryGuard = 0;
 
 	if (ReentryGuard)
 		return;
@@ -4933,6 +5086,11 @@ int CGameContext::ProcessSpamProtection(int ClientID)
 	if(Config()->m_SvSpamprotection && m_apPlayers[ClientID]->m_LastChat
 		&& m_apPlayers[ClientID]->m_LastChat + Server()->TickSpeed() * Config()->m_SvChatDelay > Server()->Tick())
 		return 1;
+	else if(Config()->m_SvDnsblChat && Server()->DnsblBlack(ClientID))
+	{
+		SendChatTarget(ClientID, m_apPlayers[ClientID]->Localize("Players are not allowed to chat from VPNs at this time"));
+		return 1;
+	}
 	else
 		m_apPlayers[ClientID]->m_LastChat = Server()->Tick();
 	NETADDR Addr;
@@ -4994,7 +5152,7 @@ void CGameContext::List(int ClientID, const char* pFilter)
 		do \
 		{ \
 			if (ClientID == -1) \
-				Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "console", str); \
+				Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "console", str); \
 			else \
 				SendChatTarget(ClientID, m_apPlayers[ClientID]->Localize(str)); \
 		} while(0)
@@ -5075,6 +5233,20 @@ bool CGameContext::RateLimitPlayerVote(int ClientID)
 	{
 		SendChatTarget(ClientID, pPlayer->Localize("You can only vote after logging in."));
 		return true;
+	}
+
+	if(Config()->m_SvDnsblVote)
+	{
+		if(m_pServer->DnsblPending(ClientID))
+		{
+			SendChatTarget(ClientID, m_apPlayers[ClientID]->Localize("You are not allowed to vote because we're currently checking for VPNs. Try again in ~30 seconds."));
+			return true;
+		}
+		else if(m_pServer->DnsblBlack(ClientID))
+		{
+			SendChatTarget(ClientID, m_apPlayers[ClientID]->Localize("You are not allowed to vote because you appear to be using a VPN. Try connecting without a VPN or contacting an admin if you think this is a mistake."));
+			return true;
+		}
 	}
 
 	if(m_VoteCloseTime)
@@ -5244,521 +5416,10 @@ void CGameContext::ConRandomUnfinishedMap(IConsole::IResult *pResult, void *pUse
 
 // F-DDrace
 
-void CGameContext::ReadPlotStats(int ID)
-{
-	std::string data;
-	char aBuf[128];
-	str_format(aBuf, sizeof(aBuf), "%s/%s/%d.plot", Config()->m_SvPlotFilePath, Server()->GetCurrentMapName(), ID);
-	std::fstream PlotFile(aBuf);
-	if (!PlotFile.is_open())
-		return;
-
-	for (int i = 0; i < NUM_PLOT_VARIABLES; i++)
-	{
-		getline(PlotFile, data);
-		const char *pData = data.c_str();
-
-		switch (i)
-		{
-		case PLOT_OWNER_ACC_USERNAME:		str_copy(m_aPlots[ID].m_aOwner, pData, sizeof(m_aPlots[ID].m_aOwner)); break;
-		case PLOT_DISPLAY_NAME:				str_copy(m_aPlots[ID].m_aDisplayName, pData, sizeof(m_aPlots[ID].m_aDisplayName)); break;
-		case PLOT_EXPIRE_DATE:				m_aPlots[ID].m_ExpireDate = atoi(pData); break;
-		case PLOT_DOOR_STATUS:				SetPlotDoorStatus(ID, atoi(pData)); break;
-		case PLOT_OBJECTS:
-		{
-			std::vector<CEntity *> vEntities = ReadPlotObjects(pData, ID);
-			for (unsigned int j = 0; j < vEntities.size(); j++)
-			{
-				vEntities[j]->m_PlotID = ID;
-				m_aPlots[ID].m_vObjects.push_back(vEntities[j]);
-			}
-		} break;
-		}
-	}
-}
-
-void CGameContext::WritePlotStats(int ID)
-{
-	char aBuf[128];
-	str_format(aBuf, sizeof(aBuf), "%s/%s/%d.plot", Config()->m_SvPlotFilePath, Server()->GetCurrentMapName(), ID);
-	std::ofstream PlotFile(aBuf);
-
-	if (PlotFile.is_open())
-	{
-		int PlotDoorStatus = Collision()->m_pSwitchers ? Collision()->m_pSwitchers[Collision()->GetSwitchByPlot(ID)].m_Status[0] : 0;
-		PlotFile << m_aPlots[ID].m_aOwner << "\n";
-		PlotFile << m_aPlots[ID].m_aDisplayName << "\n";
-		PlotFile << m_aPlots[ID].m_ExpireDate << "\n";
-		PlotFile << PlotDoorStatus << "\n";
-		
-		for (unsigned int i = 0; i < m_aPlots[ID].m_vObjects.size(); i++)
-			WritePlotObject(m_aPlots[ID].m_vObjects[i], &PlotFile);
-
-		PlotFile << "\n";
-	}
-}
-
-void CGameContext::WritePlotObject(CEntity *pEntity, std::ofstream *pFile, vec2 *pPos)
-{
-	vec2 Pos = pPos ? *pPos : pEntity->GetPos();
-	char aEntry[128];
-	switch (pEntity->GetObjType())
-	{
-		case CGameWorld::ENTTYPE_PICKUP:
-		{
-			CPickup *pPickup = (CPickup *)pEntity;
-			str_format(aEntry, sizeof(aEntry), "%d:%.2f/%.2f:%d:%d,", CGameWorld::ENTTYPE_PICKUP, Pos.x/32.f, Pos.y/32.f, pPickup->GetType(), pPickup->GetSubtype());
-			*pFile << aEntry;
-			break;
-		}
-		case CGameWorld::ENTTYPE_DOOR:
-		{
-			CDoor *pDoor = (CDoor *)pEntity;
-			str_format(aEntry, sizeof(aEntry), "%d:%.2f/%.2f:%.2f:%d:%d:%d:%d:%d:%d,", CGameWorld::ENTTYPE_DOOR, Pos.x/32.f, Pos.y/32.f, pDoor->GetRotation(), pDoor->GetLength(), (int)pDoor->m_Collision, pDoor->GetThickness(), pDoor->m_Number, (int)Collision()->m_pSwitchers[pDoor->m_Number].m_Status[0], pDoor->GetColor());
-			*pFile << aEntry;
-			break;
-		}
-		case CGameWorld::ENTTYPE_BUTTON:
-		{
-			CButton *pButton = (CButton *)pEntity;
-			str_format(aEntry, sizeof(aEntry), "%d:%.2f/%.2f:%d,", CGameWorld::ENTTYPE_BUTTON, Pos.x/32.f, Pos.y/32.f, pButton->m_Number);
-			*pFile << aEntry;
-			break;
-		}
-		case CGameWorld::ENTTYPE_SPEEDUP:
-		{
-			CSpeedup *pSpeedup = (CSpeedup *)pEntity;
-			str_format(aEntry, sizeof(aEntry), "%d:%.2f/%.2f:%d:%d:%d,", CGameWorld::ENTTYPE_SPEEDUP, Pos.x/32.f, Pos.y/32.f, pSpeedup->GetAngle(), pSpeedup->GetForce(), pSpeedup->GetMaxSpeed());
-			*pFile << aEntry;
-			break;
-		}
-		case CGameWorld::ENTTYPE_TELEPORTER:
-		{
-			CTeleporter *pTeleporter = (CTeleporter *)pEntity;
-			str_format(aEntry, sizeof(aEntry), "%d:%.2f/%.2f:%d:%d,", CGameWorld::ENTTYPE_TELEPORTER, Pos.x/32.f, Pos.y/32.f, pTeleporter->GetType(), pTeleporter->m_Number);
-			*pFile << aEntry;
-			break;
-		}
-	}
-}
-
-std::vector<CEntity *> CGameContext::ReadPlotObjects(const char *pLine, int PlotID)
-{
-	const char *pData = pLine;
-	std::vector<CEntity *> vEntities;
-	std::vector< std::pair<int, int> > vNumbers;
-	while (1)
-	{
-		if (!pData)
-			break;
-
-		vec2 Pos = vec2(-1, -1);
-		int EntityType = -1;
-
-		sscanf(pData, "%d", &EntityType);
-		switch (EntityType)
-		{
-			case CGameWorld::ENTTYPE_PICKUP:
-			{
-				int Type = -1;
-				int Subtype = -1;
-				sscanf(pData, "%d:%f/%f:%d:%d", &EntityType, &Pos.x, &Pos.y, &Type, &Subtype);
-				if (Type >= 0 && Subtype >= 0)
-				{
-					vEntities.push_back(new CPickup(&m_World, vec2(Pos.x*32.f, Pos.y*32.f), Type, Subtype));
-				}
-				break;
-			}
-			case CGameWorld::ENTTYPE_DOOR:
-			{
-				float Rotation = -1.f;
-				int Length = -1;
-				int CollisionActive = -1;
-				int Thickness = -1;
-				int Number = -1;
-				int Status = -1;
-				int Color = LASERTYPE_DOOR;
-				sscanf(pData, "%d:%f/%f:%f:%d:%d:%d:%d:%d:%d", &EntityType, &Pos.x, &Pos.y, &Rotation, &Length, &CollisionActive, &Thickness, &Number, &Status, &Color);
-				if (Rotation >= 0 && Length >= 0 && CollisionActive >= 0 && Thickness >= 0 && Number >= 0 && Status >= 0)
-				{
-					int NewNumber = -1;
-					if (Number == 0)
-					{
-						NewNumber = 0;
-					}
-					else
-					{
-						for (unsigned int i = 0; i < vNumbers.size(); i++)
-							if (vNumbers[i].first == Number)
-								NewNumber = vNumbers[i].second;
-
-						if (NewNumber == -1)
-						{
-							if ((int)vNumbers.size() >= Collision()->GetNumMaxDoors(PlotID))
-								break;
-
-							NewNumber = Collision()->GetSwitchByPlotLaserDoor(PlotID, vNumbers.size());
-							SetPlotDrawDoorStatus(PlotID, vNumbers.size(), Status);
-
-							std::pair<int, int> Pair;
-							Pair.first = Number;
-							Pair.second = NewNumber;
-							vNumbers.push_back(Pair);
-						}
-					}
-
-					vEntities.push_back(new CDoor(&m_World, vec2(Pos.x*32.f, Pos.y*32.f), Rotation, Length, NewNumber, CollisionActive, Thickness, Color));
-				}
-				break;
-			}
-			case CGameWorld::ENTTYPE_BUTTON:
-			{
-				int Number = -1;
-				sscanf(pData, "%d:%f/%f:%d", &EntityType, &Pos.x, &Pos.y, &Number);
-				if (Number >= 0)
-				{
-					int NewNumber = -1;
-					for (unsigned int i = 0; i < vNumbers.size(); i++)
-						if (vNumbers[i].first == Number)
-							NewNumber = vNumbers[i].second;
-
-					if (NewNumber == -1)
-					{
-						if ((int)vNumbers.size() >= Collision()->GetNumMaxDoors(PlotID))
-							break;
-
-						NewNumber = Collision()->GetSwitchByPlotLaserDoor(PlotID, vNumbers.size());
-						std::pair<int, int> Pair;
-						Pair.first = Number;
-						Pair.second = NewNumber;
-						vNumbers.push_back(Pair);
-					}
-
-					vEntities.push_back(new CButton(&m_World, vec2(Pos.x*32.f, Pos.y*32.f), NewNumber));
-				}
-				break;
-			}
-			case CGameWorld::ENTTYPE_SPEEDUP:
-			{
-				int Angle = -1;
-				int Force = -1;
-				int MaxSpeed = -1;
-				sscanf(pData, "%d:%f/%f:%d:%d:%d", &EntityType, &Pos.x, &Pos.y, &Angle, &Force, &MaxSpeed);
-				if (Angle >= 0 && Force > 0 && MaxSpeed >= 0)
-				{
-					vEntities.push_back(new CSpeedup(&m_World, vec2(Pos.x*32.f, Pos.y*32.f), Angle, Force, MaxSpeed));
-				}
-				break;
-			}
-			case CGameWorld::ENTTYPE_TELEPORTER:
-			{
-				int Type = 0;
-				int Number = -1;
-				sscanf(pData, "%d:%f/%f:%d:%d", &EntityType, &Pos.x, &Pos.y, &Type, &Number);
-				if (Type > 0 && Number >= 0)
-				{
-					int NewNumber = -1;
-					for (unsigned int i = 0; i < vNumbers.size(); i++)
-						if (vNumbers[i].first == Number)
-							NewNumber = vNumbers[i].second;
-
-					if (NewNumber == -1)
-					{
-						if ((int)vNumbers.size() >= Collision()->GetNumMaxTeleporters(PlotID))
-							break;
-
-						NewNumber = Collision()->GetSwitchByPlotTeleporter(PlotID, vNumbers.size());
-						std::pair<int, int> Pair;
-						Pair.first = Number;
-						Pair.second = NewNumber;
-						vNumbers.push_back(Pair);
-					}
-
-					vEntities.push_back(new CTeleporter(&m_World, vec2(Pos.x*32.f, Pos.y*32.f), Type, NewNumber));
-				}
-				break;
-			}
-		}
-
-		// jump to next comma, if it exists skip it so we can start the next loop run with the next data
-		if ((pData = str_find(pData, ",")))
-			pData++;
-	}
-
-	return vEntities;
-}
-
-int CGameContext::LoadPresetListCallback(const char *pName, int IsDir, int StorageType, void *pUser)
-{
-	CGameContext *pSelf = (CGameContext *)pUser;
-	if (!IsDir && str_endswith(pName, ".plot"))
-	{
-		std::string Name = pName;
-		Name = Name.erase(Name.size() - 5); // remove .plot
-		for (unsigned int i = 0; i < pSelf->m_vPresetList.size(); i++)
-			if (pSelf->m_vPresetList[i] == Name)
-				return 0;
-
-		pSelf->m_vPresetList.push_back(Name);
-	}
-	return 0;
-}
-
-int CGameContext::GetPlotID(int AccID)
-{
-	if (AccID < ACC_START)
-		return 0;
-
-	for (int i = PLOT_START; i < Collision()->m_NumPlots + 1; i++)
-		if (str_comp(m_Accounts[AccID].m_Username, m_aPlots[i].m_aOwner) == 0)
-			return i;
-	return 0;
-}
-
-int CGameContext::GetTilePlotID(vec2 Pos, bool CheckDoor)
-{
-	int PlotDoor = CheckDoor ? Collision()->GetPlotBySwitch(Collision()->CheckPointDoor(Pos, 0, true, false)) : 0; // can use team 0 for checkpointdoor because closedonly = false
-	return PlotDoor >= PLOT_START ? PlotDoor : Collision()->GetPlotID(Collision()->GetMapIndex(Pos));
-}
-
-void CGameContext::SetPlotInfo(int PlotID, int AccID)
-{
-	if (PlotID <= 0 || PlotID > Collision()->m_NumPlots || AccID < ACC_START)
-		return;
-
-	str_copy(m_aPlots[PlotID].m_aOwner, m_Accounts[AccID].m_Username, sizeof(m_aPlots[PlotID].m_aOwner));
-	str_copy(m_aPlots[PlotID].m_aDisplayName, m_Accounts[AccID].m_aLastPlayerName, sizeof(m_aPlots[PlotID].m_aDisplayName));
-	WritePlotStats(PlotID);
-}
-
-void CGameContext::SetPlotExpire(int PlotID)
-{
-	if (PlotID <= 0 || PlotID > Collision()->m_NumPlots)
-		return;
-
-	int Days = m_aPlots[PlotID].m_Size == 0 ? ITEM_EXPIRE_PLOT_SMALL : m_aPlots[PlotID].m_Size == 1 ? ITEM_EXPIRE_PLOT_BIG : 0;
-	SetExpireDateDays(&m_aPlots[PlotID].m_ExpireDate, Days);
-}
-
-bool CGameContext::HasPlotByIP(int ClientID)
-{
-	bool HasPlot = false;
-	NETADDR Addr;
-	Server()->GetClientAddr(ClientID, &Addr);
-
-	for (int i = PLOT_START; i < Collision()->m_NumPlots + 1; i++)
-	{
-		int ID = GetAccount(m_aPlots[i].m_aOwner);
-		if (ID < ACC_START)
-			continue;
-
-		if (SameIP(ID, &Addr))
-			HasPlot = true;
-
-		if (!IsAccLoggedInThisPort(ID))
-			FreeAccount(ID);
-
-		if (HasPlot)
-			break;
-	}
-
-	return HasPlot;
-}
-
-unsigned int CGameContext::GetMaxPlotObjects(int PlotID)
-{
-	if (PlotID < 0 || PlotID > Collision()->m_NumPlots)
-		return 0;
-
-	if (PlotID >= PLOT_START)
-	{
-		switch (m_aPlots[PlotID].m_Size)
-		{
-		case PLOT_SMALL: return Config()->m_SvMaxObjectsPlotSmall;
-		case PLOT_BIG: return Config()->m_SvMaxObjectsPlotBig;
-		}
-	}
-
-	return Config()->m_SvMaxObjectsFreeDraw;
-}
-
-const char *CGameContext::GetPlotSizeString(int PlotID)
-{
-	if (PlotID <= 0 || PlotID > Collision()->m_NumPlots)
-		return "Unknown";
-
-	switch (m_aPlots[PlotID].m_Size)
-	{
-	case PLOT_SMALL: return "small";
-	case PLOT_BIG: return "big";
-	}
-
-	return "Unkown";
-}
-
-int CGameContext::GetMaxPlotSpeedups(int PlotID)
-{
-	if (PlotID <= 0 || PlotID > Collision()->m_NumPlots)
-		return 0; // free draw has unlimited, so doesnt matter
-
-	switch (m_aPlots[PlotID].m_Size)
-	{
-	case PLOT_SMALL: return 15;
-	case PLOT_BIG: return 40;
-	}
-	return 0;
-}
-
-int CGameContext::GetMaxPlotTeleporters(int PlotID)
-{
-	if (PlotID <= 0 || PlotID > Collision()->m_NumPlots)
-		return 0; // free draw has unlimited, so doesnt matter
-
-	switch (m_aPlots[PlotID].m_Size)
-	{
-	case PLOT_SMALL: return 4;
-	case PLOT_BIG: return 10;
-	}
-	return 0;
-}
-
-void CGameContext::ExpirePlots()
-{
-	for (int i = PLOT_START; i < Collision()->m_NumPlots + 1; i++)
-	{
-		if (IsExpired(m_aPlots[i].m_ExpireDate))
-		{
-			int AccID = GetAccIDByUsername(m_aPlots[i].m_aOwner);
-			if (AccID >= ACC_START)
-			{
-				int ClientID = m_Accounts[AccID].m_ClientID;
-				if (ClientID >= 0 && m_apPlayers[ClientID])
-				{
-					SendChatTarget(ClientID, m_apPlayers[ClientID]->Localize("Your plot expired"));
-					m_apPlayers[ClientID]->CancelPlotAuction();
-					m_apPlayers[ClientID]->CancelPlotSwap();
-					m_apPlayers[ClientID]->StopPlotEditing();
-				}
-			}
-
-			m_aPlots[i].m_aOwner[0] = 0;
-			m_aPlots[i].m_aDisplayName[0] = 0;
-			m_aPlots[i].m_ExpireDate = 0;
-			m_aPlots[i].m_DestroyEndTick = 0;
-			m_aPlots[i].m_DoorHealth = Config()->m_SvPlotDoorHealth;
-			ClearPlot(i);
-			SetPlotDoorStatus(i, true);
-		}
-	}
-}
-
-void CGameContext::SetPlotDoorStatus(int PlotID, bool Close)
-{
-	if (PlotID <= 0 || PlotID > Collision()->m_NumPlots || !Collision()->m_pSwitchers)
-		return;
-
-	int Switch = Collision()->GetSwitchByPlot(PlotID);
-	for (int i = 0; i < VANILLA_MAX_CLIENTS; i++)
-		Collision()->m_pSwitchers[Switch].m_Status[i] = Close;
-}
-
-void CGameContext::SetPlotDrawDoorStatus(int PlotID, int Door, bool Close)
-{
-	if (PlotID <= 0 || PlotID > Collision()->m_NumPlots || Door >= Collision()->GetNumMaxDoors(PlotID) || !Collision()->m_pSwitchers)
-		return;
-
-	int Switch = Collision()->GetSwitchByPlotLaserDoor(PlotID, Door);
-	for (int i = 0; i < VANILLA_MAX_CLIENTS; i++)
-		Collision()->m_pSwitchers[Switch].m_Status[i] = Close;
-}
-
-void CGameContext::SetPlotDrawDoorStatus(int Number, bool Close)
-{
-	if (!Collision()->IsPlotDrawDoor(Number) || !Collision()->m_pSwitchers)
-		return;
-
-	for (int i = 0; i < VANILLA_MAX_CLIENTS; i++)
-		Collision()->m_pSwitchers[Number].m_Status[i] = Close;
-}
-
-void CGameContext::ClearPlot(int PlotID)
-{
-	if (PlotID >= 0 && PlotID <= Collision()->m_NumPlots)
-	{
-		for (unsigned i = 0; i < m_aPlots[PlotID].m_vObjects.size(); i++)
-			m_World.DestroyEntity(m_aPlots[PlotID].m_vObjects[i]);
-		m_aPlots[PlotID].m_vObjects.clear();
-	}
-}
-
 int CGameContext::IntersectedLineDoor(vec2 Pos0, vec2 Pos1, int Team, bool PlotDoorOnly, bool ClosedOnly)
 {
 	int Number = Collision()->IntersectLineDoor(Pos0, Pos1, 0, 0, Team, PlotDoorOnly, ClosedOnly);
 	return Number; // can be used as bool, -1 is plot built laser wall which would return true too
-}
-
-void CGameContext::RemovePortalsFromPlot(int PlotID)
-{
-	if (PlotID >= PLOT_START && PlotID <= Collision()->m_NumPlots)
-	{
-		CPortal *pPortal = (CPortal *)m_World.FindFirst(CGameWorld::ENTTYPE_PORTAL);
-		for (; pPortal; pPortal = (CPortal *)pPortal->TypeNext())
-		{
-			if (GetTilePlotID(pPortal->GetPos(), true) == PlotID)
-			{
-				pPortal->DestroyLinkedPortal();
-				pPortal->Reset();
-			}
-		}
-	}
-}
-
-bool CGameContext::IsPlotEmpty(int PlotID)
-{
-	for (int i = 0; i < MAX_CLIENTS; i++)
-		if (GetPlayerChar(i) && GetPlayerChar(i)->GetCurrentTilePlotID(true) == PlotID)
-			return false;
-	return true;
-}
-
-bool CGameContext::PlotCanBeRaided(int PlotID)
-{
-	return PlotID >= PLOT_START && m_aPlots[PlotID].m_DestroyEndTick > Server()->Tick() && Config()->m_SvPoliceTaserPlotRaid;
-}
-
-bool CGameContext::PlotDoorDestroyed(int PlotID)
-{
-	return m_aPlots[PlotID].m_DoorHealth <= 0;
-}
-
-bool CGameContext::OnPlotDoorTaser(int PlotID, int TaserStrength, int ClientID, vec2 Pos)
-{
-	if (PlotID < PLOT_START || !PlotCanBeRaided(PlotID) || m_aPlots[PlotID].m_DoorHealth <= 0)
-		return false;
-
-	int Diff = TaserStrength - max(TaserStrength - m_aPlots[PlotID].m_DoorHealth, 0);
-	m_aPlots[PlotID].m_DoorHealth -= Diff;
-	CreateDamage(Pos, ClientID, vec2(0, 0), Diff, 0, false);
-
-	if (m_aPlots[PlotID].m_DoorHealth <= 0)
-	{
-		m_aPlots[PlotID].m_DoorHealth = 0;
-		SendBroadcast("", ClientID, false);
-		CreateDeath(Pos, ClientID);
-		int AccID = GetAccIDByUsername(m_aPlots[PlotID].m_aOwner);
-		if (AccID >= ACC_START)
-		{
-			int PlotOwner = m_Accounts[AccID].m_ClientID;
-			if (PlotOwner >= 0 && m_apPlayers[PlotOwner])
-			{
-				SendChatTarget(PlotOwner, m_apPlayers[PlotOwner]->Localize("The police have gained access to your plot in hopes of finding you"));
-			}
-		}
-		return true;
-	}
-
-	SendBroadcastFormat(ClientID, true, Localizable("Plot %d Door Health [%d/%d]"), PlotID, m_aPlots[PlotID].m_DoorHealth, Config()->m_SvPlotDoorHealth);
-	return false;
 }
 
 void CGameContext::SetExpireDateDays(time_t *pDate, float Days)
@@ -5822,763 +5483,6 @@ bool CGameContext::IsExpired(time_t Date)
 	return Minutes >= 0;
 }
 
-float CGameContext::MonthsPassedSinceRegister(int AccID)
-{
-	if (AccID < ACC_START)
-		return 0;
-
-	time_t Date = m_Accounts[AccID].m_RegisterDate;
-	if (!Date)
-	{
-		// Register date unknown, registered before records started, set register date to 9th april 2021 when it got added for comparison
-		Date = (time_t)1617919200;
-	}
-
-	time_t Now;
-	time(&Now);
-	double Seconds = difftime(Now, Date);
-	int Days = Seconds / 60 / 60 / 24;
-	return Days / 30.f;
-}
-
-void CGameContext::LazySaveTopAccounts()
-{
-	char aFile[256];
-	str_format(aFile, sizeof(aFile), "%s/topaccounts.txt", Config()->m_SvTopAccountsFilePath);
-	std::ofstream TopAccsFile(aFile);
-	if (TopAccsFile.is_open())
-	{
-		char aEntry[256];
-		for (unsigned int i = 0; i < m_TopAccounts.size(); i++)
-		{
-			str_format(aEntry, sizeof(aEntry), "%s\t%s\t%d\t%d\t%lld\t%d\t%d\t%d\t%d\t%d",
-				m_TopAccounts[i].m_aAccountName,
-				m_TopAccounts[i].m_aUsername,
-				m_TopAccounts[i].m_Level,
-				m_TopAccounts[i].m_Points,
-				m_TopAccounts[i].m_Money,
-				m_TopAccounts[i].m_KillStreak,
-				m_TopAccounts[i].m_PortalBattery,
-				m_TopAccounts[i].m_PortalBlocker,
-				m_TopAccounts[i].m_DurakWins,
-				m_TopAccounts[i].m_DurakProfit
-			);
-			TopAccsFile << aEntry << "\n";
-		}
-		TopAccsFile << "\n";
-	}
-	m_TopAccounts.clear();
-}
-
-bool CGameContext::LazyLoadTopAccounts(int Type)
-{
-	char aFile[256];
-	str_format(aFile, sizeof(aFile), "%s/topaccounts.txt", Config()->m_SvTopAccountsFilePath);
-	std::fstream TopAccsFile(aFile);
-	if (!TopAccsFile.is_open())
-		return false;
-
-	std::unordered_map<std::string, CGameContext::AccountInfo> AccountMap;
-	for (unsigned int AccID = ACC_START; AccID < m_Accounts.size(); AccID++)
-	{
-		AccountMap[m_Accounts[AccID].m_Username] = m_Accounts[AccID];
-	}
-
-	std::string data;
-	while (getline(TopAccsFile, data))
-	{
-		CGameContext::TopAccounts Account;
-		const char *pData = data.c_str();
-		int Num = sscanf(pData, "%[^\t]\t%[^\t]\t%d\t%d\t%lld\t%d\t%d\t%d\t%d\t%d",
-			Account.m_aAccountName,
-			Account.m_aUsername,
-			&Account.m_Level,
-			&Account.m_Points,
-			&Account.m_Money,
-			&Account.m_KillStreak,
-			&Account.m_PortalBattery,
-			&Account.m_PortalBlocker,
-			&Account.m_DurakWins,
-			&Account.m_DurakProfit
-		);
-
-		if (Num == 10)
-		{
-			// update top accounts with all currently online accs so we get correct and up-to-date information
-			auto it = AccountMap.find(Account.m_aAccountName);
-			if (it != AccountMap.end())
-			{
-				str_copy(Account.m_aUsername, it->second.m_aLastPlayerName, sizeof(Account.m_aUsername));
-				Account.m_Level = it->second.m_Level;
-				Account.m_Points = it->second.m_BlockPoints;
-				Account.m_Money = it->second.m_Money;
-				Account.m_KillStreak = it->second.m_KillingSpreeRecord;
-				Account.m_PortalBattery = it->second.m_PortalBattery;
-				Account.m_PortalBlocker = it->second.m_PortalBlocker;
-				Account.m_DurakWins = it->second.m_DurakWins;
-				Account.m_DurakProfit = it->second.m_DurakProfit;
-			}
-			m_TopAccounts.push_back(Account);
-		}
-	}
-
-	std::sort(m_TopAccounts.begin(), m_TopAccounts.end(), [Type](const TopAccounts &a, const TopAccounts &b) -> bool {
-		switch (Type)
-		{
-			case TOP_LEVEL: return a.m_Level > b.m_Level;
-			case TOP_POINTS: return a.m_Points > b.m_Points;
-			case TOP_MONEY: return a.m_Money > b.m_Money;
-			case TOP_SPREE: return a.m_KillStreak > b.m_KillStreak;
-			case TOP_PORTAL_BATTERY: return a.m_PortalBattery > b.m_PortalBattery;
-			case TOP_PORTAL_BLOCKER: return a.m_PortalBlocker > b.m_PortalBlocker;
-			case TOP_DURAK_WINS: return a.m_DurakWins > b.m_DurakWins;
-			case TOP_DURAK_PROFIT: return a.m_DurakProfit > b.m_DurakProfit;
-			default: return false;
-		}
-	});
-	return true;
-}
-
-void CGameContext::SetTopAccStats(int FromID)
-{
-	for (unsigned int i = 0; i < m_TopAccounts.size(); i++)
-	{
-		// update if we have it in already
-		if (!str_comp(m_Accounts[FromID].m_Username, m_TopAccounts[i].m_aAccountName))
-		{
-			m_TopAccounts[i].m_Level = m_Accounts[FromID].m_Level;
-			m_TopAccounts[i].m_Points = m_Accounts[FromID].m_BlockPoints;
-			m_TopAccounts[i].m_Money = m_Accounts[FromID].m_Money;
-			m_TopAccounts[i].m_KillStreak = m_Accounts[FromID].m_KillingSpreeRecord;
-			m_TopAccounts[i].m_PortalBattery = m_Accounts[FromID].m_PortalBattery;
-			m_TopAccounts[i].m_PortalBlocker = m_Accounts[FromID].m_PortalBlocker;
-			m_TopAccounts[i].m_DurakWins = m_Accounts[FromID].m_DurakWins;
-			m_TopAccounts[i].m_DurakProfit = m_Accounts[FromID].m_DurakProfit;
-			str_copy(m_TopAccounts[i].m_aUsername, m_Accounts[FromID].m_aLastPlayerName, sizeof(m_TopAccounts[i].m_aUsername));
-			return;
-		}
-	}
-
-	// if not existing in m_TopAccounts yet, add it
-	CGameContext::TopAccounts Account;
-	Account.m_Level = m_Accounts[FromID].m_Level;
-	Account.m_Points = m_Accounts[FromID].m_BlockPoints;
-	Account.m_Money = m_Accounts[FromID].m_Money;
-	Account.m_KillStreak = m_Accounts[FromID].m_KillingSpreeRecord;
-	Account.m_PortalBattery = m_Accounts[FromID].m_PortalBattery;
-	Account.m_PortalBlocker = m_Accounts[FromID].m_PortalBlocker;
-	Account.m_DurakWins = m_Accounts[FromID].m_DurakWins;
-	Account.m_DurakProfit = m_Accounts[FromID].m_DurakProfit;
-	str_copy(Account.m_aUsername, m_Accounts[FromID].m_aLastPlayerName, sizeof(Account.m_aUsername));
-	str_copy(Account.m_aAccountName, m_Accounts[FromID].m_Username, sizeof(Account.m_aAccountName));
-	m_TopAccounts.push_back(Account);
-}
-
-void CGameContext::SaveCurrentTopAccounts()
-{
-	LazyLoadTopAccounts(TOP_LEVEL);
-	for (unsigned int i = 0; i < m_Accounts.size(); i++)
-		SetTopAccStats(i);
-	LazySaveTopAccounts();
-}
-
-int CGameContext::InitAccounts(const char *pName, int IsDir, int StorageType, void *pUser)
-{
-	CGameContext *pSelf = (CGameContext *)pUser;
-
-	if (!IsDir && str_endswith(pName, ".acc"))
-	{
-		char aUsername[64];
-		str_copy(aUsername, pName, str_length(pName) - 3); // remove the .acc
-
-		int ID = pSelf->GetAccount(aUsername);
-		if (ID < ACC_START)
-			return 0;
-
-		// load all accounts into the top account list too
-		pSelf->SetTopAccStats(ID);
-
-		// logout account if needed
-		if (pSelf->m_Accounts[ID].m_LoggedIn && pSelf->m_Accounts[ID].m_Port == pSelf->m_LogoutAccountsPort)
-			pSelf->Logout(ID, true);
-		else
-			pSelf->FreeAccount(ID);
-	}
-
-	return 0;
-}
-
-int CGameContext::AddAccount()
-{
-	AccountInfo Account;
-	Account.m_Port = Config()->m_SvPort;
-	Account.m_LoggedIn = false;
-	Account.m_Disabled = false;
-	Account.m_Password.data[0] = 0;
-	Account.m_Username[0] = '\0';
-	Account.m_ClientID = -1;
-	Account.m_Level = 0;
-	Account.m_XP = 0;
-	Account.m_Money = 0;
-	Account.m_Kills = 0;
-	Account.m_Deaths = 0;
-	Account.m_PoliceLevel = 0;
-	Account.m_SurvivalKills = 0;
-	Account.m_SurvivalWins = 0;
-	Account.m_aLastMoneyTransaction[0][0] = '\0';
-	Account.m_aLastMoneyTransaction[1][0] = '\0';
-	Account.m_aLastMoneyTransaction[2][0] = '\0';
-	Account.m_aLastMoneyTransaction[3][0] = '\0';
-	Account.m_aLastMoneyTransaction[4][0] = '\0';
-	Account.m_SpookyGhost = false;
-	Account.m_VIP = 0;
-	Account.m_BlockPoints = 0;
-	Account.m_InstagibKills = 0;
-	Account.m_InstagibWins = 0;
-	Account.m_SpawnWeapon[0] = 0;
-	Account.m_SpawnWeapon[1] = 0;
-	Account.m_SpawnWeapon[2] = 0;
-	Account.m_Ninjajetpack = false;
-	Account.m_aLastPlayerName[0] = '\0';
-	Account.m_SurvivalDeaths = 0;
-	Account.m_InstagibDeaths = 0;
-	Account.m_TaserLevel = 0;
-	Account.m_KillingSpreeRecord = 0;
-	Account.m_Euros = 0;
-	Account.m_ExpireDateVIP = 0;
-	Account.m_PortalRifle = 0;
-	Account.m_ExpireDatePortalRifle = 0;
-	Account.m_Version = ACC_CURRENT_VERSION;
-	Account.m_Addr.type = -1;
-	Account.m_LastAddr.type = -1;
-	Account.m_TaserBattery = 0;
-	Account.m_aContact[0] = '\0';
-	Account.m_aTimeoutCode[0] = '\0';
-	Account.m_aSecurityPin[0] = '\0';
-	Account.m_RegisterDate = 0;
-	Account.m_LastLoginDate = 0;
-	Account.m_Flags = 0;
-	Account.m_aEmail[0] = '\0';
-	Account.m_aDesign[0] = '\0';
-	Account.m_PortalBattery = 0;
-	Account.m_PortalBlocker = 0;
-	Account.m_VoteMenuFlags = 0;
-	Account.m_DurakWins = 0;
-	Account.m_DurakProfit = 0;
-	Account.m_aLanguage[0] = '\0';
-
-	m_Accounts.push_back(Account);
-	return m_Accounts.size()-1;
-}
-
-void CGameContext::ReadAccountStats(int ID, const char *pName)
-{
-	std::string data;
-	char aBuf[128];
-	str_format(aBuf, sizeof(aBuf), "%s/%s.acc", Config()->m_SvAccFilePath, pName);
-	std::fstream AccFile(aBuf);
-
-	for (int i = 0; i < NUM_ACCOUNT_VARIABLES; i++)
-	{
-		getline(AccFile, data);
-		const char *pData = data.c_str();
-		SetAccVar(ID, i, pData);
-	}
-}
-
-void CGameContext::WriteAccountStats(int ID)
-{
-	std::string data;
-	char aBuf[128];
-	str_format(aBuf, sizeof(aBuf), "%s/%s.acc", Config()->m_SvAccFilePath, m_Accounts[ID].m_Username);
-	std::ofstream AccFile(aBuf);
-
-	if (AccFile.is_open())
-	{
-		for (int i = 0; i < NUM_ACCOUNT_VARIABLES; i++)
-		{
-			AccFile << GetAccVarValue(ID, i) << "\n";
-		}
-		dbg_msg("acc", "saved acc '%s'", m_Accounts[ID].m_Username);
-	}
-	AccFile.close();
-}
-
-void CGameContext::SetAccVar(int ID, int VariableID, const char *pData)
-{
-	switch (VariableID)
-	{
-	case ACC_PORT:						m_Accounts[ID].m_Port = atoi(pData); break;
-	case ACC_LOGGED_IN:					m_Accounts[ID].m_LoggedIn = atoi(pData); break;
-	case ACC_DISABLED:					m_Accounts[ID].m_Disabled = atoi(pData); break;
-	case ACC_PASSWORD:					sha256_from_str(&m_Accounts[ID].m_Password, pData); break;
-	case ACC_USERNAME:					str_copy(m_Accounts[ID].m_Username, pData, sizeof(m_Accounts[ID].m_Username)); break;
-	case ACC_CLIENT_ID:					m_Accounts[ID].m_ClientID = atoi(pData); break;
-	case ACC_LEVEL:						m_Accounts[ID].m_Level = atoi(pData); break;
-	case ACC_XP:						m_Accounts[ID].m_XP = atoll(pData); break;
-	case ACC_MONEY:						m_Accounts[ID].m_Money = atoll(pData); break;
-	case ACC_KILLS:						m_Accounts[ID].m_Kills = atoi(pData); break;
-	case ACC_DEATHS:					m_Accounts[ID].m_Deaths = atoi(pData); break;
-	case ACC_POLICE_LEVEL:				m_Accounts[ID].m_PoliceLevel = atoi(pData); break;
-	case ACC_SURVIVAL_KILLS:			m_Accounts[ID].m_SurvivalKills = atoi(pData); break;
-	case ACC_SURVIVAL_WINS:				m_Accounts[ID].m_SurvivalWins = atoi(pData); break;
-	case ACC_SPOOKY_GHOST:				m_Accounts[ID].m_SpookyGhost = atoi(pData); break;
-	case ACC_LAST_MONEY_TRANSACTION_0:	str_copy(m_Accounts[ID].m_aLastMoneyTransaction[0], pData, sizeof(m_Accounts[ID].m_aLastMoneyTransaction[0])); break;
-	case ACC_LAST_MONEY_TRANSACTION_1:	str_copy(m_Accounts[ID].m_aLastMoneyTransaction[1], pData, sizeof(m_Accounts[ID].m_aLastMoneyTransaction[1])); break;
-	case ACC_LAST_MONEY_TRANSACTION_2:	str_copy(m_Accounts[ID].m_aLastMoneyTransaction[2], pData, sizeof(m_Accounts[ID].m_aLastMoneyTransaction[2])); break;
-	case ACC_LAST_MONEY_TRANSACTION_3:	str_copy(m_Accounts[ID].m_aLastMoneyTransaction[3], pData, sizeof(m_Accounts[ID].m_aLastMoneyTransaction[3])); break;
-	case ACC_LAST_MONEY_TRANSACTION_4:	str_copy(m_Accounts[ID].m_aLastMoneyTransaction[4], pData, sizeof(m_Accounts[ID].m_aLastMoneyTransaction[4])); break;
-	case ACC_VIP:						m_Accounts[ID].m_VIP = atoi(pData); break;
-	case ACC_BLOCK_POINTS:				m_Accounts[ID].m_BlockPoints = atoi(pData); break;
-	case ACC_INSTAGIB_KILLS:			m_Accounts[ID].m_InstagibKills = atoi(pData); break;
-	case ACC_INSTAGIB_WINS:				m_Accounts[ID].m_InstagibWins = atoi(pData); break;
-	case ACC_SPAWN_WEAPON_0:			m_Accounts[ID].m_SpawnWeapon[0] = atoi(pData); break;
-	case ACC_SPAWN_WEAPON_1:			m_Accounts[ID].m_SpawnWeapon[1] = atoi(pData); break;
-	case ACC_SPAWN_WEAPON_2:			m_Accounts[ID].m_SpawnWeapon[2] = atoi(pData); break;
-	case ACC_NINJAJETPACK:				m_Accounts[ID].m_Ninjajetpack = atoi(pData); break;
-	case ACC_LAST_PLAYER_NAME:			str_copy(m_Accounts[ID].m_aLastPlayerName, pData, sizeof(m_Accounts[ID].m_aLastPlayerName)); break;
-	case ACC_SURVIVAL_DEATHS:			m_Accounts[ID].m_SurvivalDeaths = atoi(pData); break;
-	case ACC_INSTAGIB_DEATHS:			m_Accounts[ID].m_InstagibDeaths = atoi(pData); break;
-	case ACC_TASER_LEVEL:				m_Accounts[ID].m_TaserLevel = atoi(pData); break;
-	case ACC_KILLING_SPREE_RECORD:		m_Accounts[ID].m_KillingSpreeRecord = atoi(pData); break;
-	case ACC_EUROS:						m_Accounts[ID].m_Euros = atof(pData); break;
-	case ACC_EXPIRE_DATE_VIP:			m_Accounts[ID].m_ExpireDateVIP = atoll(pData); break;
-	case ACC_PORTAL_RIFLE:				m_Accounts[ID].m_PortalRifle = atoi(pData); break;
-	case ACC_EXPIRE_DATE_PORTAL_RIFLE:	m_Accounts[ID].m_ExpireDatePortalRifle = atoll(pData); break;
-	case ACC_VERSION:					m_Accounts[ID].m_Version = atoi(pData); break;
-	case ACC_ADDR:						net_addr_from_str(&m_Accounts[ID].m_Addr, pData); break;
-	case ACC_LAST_ADDR:					net_addr_from_str(&m_Accounts[ID].m_LastAddr, pData); break;
-	case ACC_TASER_BATTERY:				m_Accounts[ID].m_TaserBattery = atoi(pData); break;
-	case ACC_CONTACT:					str_copy(m_Accounts[ID].m_aContact, pData, sizeof(m_Accounts[ID].m_aContact)); break;
-	case ACC_TIMEOUT_CODE:				str_copy(m_Accounts[ID].m_aTimeoutCode, pData, sizeof(m_Accounts[ID].m_aTimeoutCode)); break;
-	case ACC_SECURITY_PIN:				str_copy(m_Accounts[ID].m_aSecurityPin, pData, sizeof(m_Accounts[ID].m_aSecurityPin)); break;
-	case ACC_REGISTER_DATE:				m_Accounts[ID].m_RegisterDate = atoll(pData); break;
-	case ACC_LAST_LOGIN_DATE:			m_Accounts[ID].m_LastLoginDate = atoll(pData); break;
-	case ACC_FLAGS:						m_Accounts[ID].m_Flags = atoi(pData); break;
-	case ACC_EMAIL:						str_copy(m_Accounts[ID].m_aEmail, pData, sizeof(m_Accounts[ID].m_aEmail)); break;
-	case ACC_DESIGN:					str_copy(m_Accounts[ID].m_aDesign, pData, sizeof(m_Accounts[ID].m_aDesign)); break;
-	case ACC_PORTAL_BATTERY:			m_Accounts[ID].m_PortalBattery = atoi(pData); break;
-	case ACC_PORTAL_BLOCKER:			m_Accounts[ID].m_PortalBlocker = atoi(pData); break;
-	case ACC_VOTE_MENU_FLAGS:			m_Accounts[ID].m_VoteMenuFlags = atoi(pData); break;
-	case ACC_DURAK_WINS:				m_Accounts[ID].m_DurakWins = atoi(pData); break;
-	case ACC_DURAK_PROFIT:				m_Accounts[ID].m_DurakProfit = atoll(pData); break;
-	case ACC_LANGUAGE:					str_copy(m_Accounts[ID].m_aLanguage, pData, sizeof(m_Accounts[ID].m_aLanguage)); break;
-	}
-}
-
-const char *CGameContext::GetAccVarName(int VariableID)
-{
-	switch (VariableID)
-	{
-	case ACC_PORT:						return "port";
-	case ACC_LOGGED_IN:					return "logged_in";
-	case ACC_DISABLED:					return "disabled";
-	case ACC_PASSWORD:					return "password";
-	case ACC_USERNAME:					return "username";
-	case ACC_CLIENT_ID:					return "client_id";
-	case ACC_LEVEL:						return "level";
-	case ACC_XP:						return "xp";
-	case ACC_MONEY:						return "money";
-	case ACC_KILLS:						return "kills";
-	case ACC_DEATHS:					return "deaths";
-	case ACC_POLICE_LEVEL:				return "police_level";
-	case ACC_SURVIVAL_KILLS:			return "survival_kills";
-	case ACC_SURVIVAL_WINS:				return "survival_wins";
-	case ACC_SPOOKY_GHOST:				return "spooky_ghost";
-	case ACC_LAST_MONEY_TRANSACTION_0:	return "last_money_transaction_0";
-	case ACC_LAST_MONEY_TRANSACTION_1:	return "last_money_transaction_1";
-	case ACC_LAST_MONEY_TRANSACTION_2:	return "last_money_transaction_2";
-	case ACC_LAST_MONEY_TRANSACTION_3:	return "last_money_transaction_3";
-	case ACC_LAST_MONEY_TRANSACTION_4:	return "last_money_transaction_4";
-	case ACC_VIP:						return "vip";
-	case ACC_BLOCK_POINTS:				return "block_points";
-	case ACC_INSTAGIB_KILLS:			return "instagib_kills";
-	case ACC_INSTAGIB_WINS:				return "instagib_wins";
-	case ACC_SPAWN_WEAPON_0:			return "spawn_weapon_shotgun";
-	case ACC_SPAWN_WEAPON_1:			return "spawn_weapon_grenade";
-	case ACC_SPAWN_WEAPON_2:			return "spawn_weapon_rifle";
-	case ACC_NINJAJETPACK:				return "ninjajetpack";
-	case ACC_LAST_PLAYER_NAME:			return "last_player_name";
-	case ACC_SURVIVAL_DEATHS:			return "survival_deaths";
-	case ACC_INSTAGIB_DEATHS:			return "instagib_deaths";
-	case ACC_TASER_LEVEL:				return "taser_level";
-	case ACC_KILLING_SPREE_RECORD:		return "killing_spree_record";
-	case ACC_EUROS:						return "euros";
-	case ACC_EXPIRE_DATE_VIP:			return "expire_date_vip";
-	case ACC_PORTAL_RIFLE:				return "portal_rifle";
-	case ACC_EXPIRE_DATE_PORTAL_RIFLE:	return "expire_date_portal_rifle";
-	case ACC_VERSION:					return "version";
-	case ACC_ADDR:						return "addr";
-	case ACC_LAST_ADDR:					return "last_addr";
-	case ACC_TASER_BATTERY:				return "taser_battery";
-	case ACC_CONTACT:					return "contact";
-	case ACC_TIMEOUT_CODE:				return "timeout_code";
-	case ACC_SECURITY_PIN:				return "security_pin";
-	case ACC_REGISTER_DATE:				return "register_date";
-	case ACC_LAST_LOGIN_DATE:			return "last_login_date";
-	case ACC_FLAGS:						return "flags";
-	case ACC_EMAIL:						return "email";
-	case ACC_DESIGN:					return "design";
-	case ACC_PORTAL_BATTERY:			return "portal_battery";
-	case ACC_PORTAL_BLOCKER:			return "portal_blocker";
-	case ACC_VOTE_MENU_FLAGS:			return "vote_menu_flags";
-	case ACC_DURAK_WINS:				return "durak_wins";
-	case ACC_DURAK_PROFIT:				return "durak_profit";
-	case ACC_LANGUAGE:					return "language";
-	}
-	return "Unknown";
-}
-
-const char *CGameContext::GetAccVarValue(int ID, int VariableID)
-{
-	static char aBuf[128];
-	str_copy(aBuf, "Unknown", sizeof(aBuf));
-
-	switch (VariableID)
-	{
-	case ACC_PORT:						str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_Port); break;
-	case ACC_LOGGED_IN:					str_format(aBuf, sizeof(aBuf), "%d", (int)m_Accounts[ID].m_LoggedIn); break;
-	case ACC_DISABLED:					str_format(aBuf, sizeof(aBuf), "%d", (int)m_Accounts[ID].m_Disabled); break;
-	case ACC_PASSWORD:					sha256_str(m_Accounts[ID].m_Password, aBuf, sizeof(aBuf)); break;
-	case ACC_USERNAME:					str_copy(aBuf, m_Accounts[ID].m_Username, sizeof(aBuf)); break;
-	case ACC_CLIENT_ID:					str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_ClientID); break;
-	case ACC_LEVEL:						str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_Level); break;
-	case ACC_XP:						str_format(aBuf, sizeof(aBuf), "%lld", m_Accounts[ID].m_XP); break;
-	case ACC_MONEY:						str_format(aBuf, sizeof(aBuf), "%lld", m_Accounts[ID].m_Money); break;
-	case ACC_KILLS:						str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_Kills); break;
-	case ACC_DEATHS:					str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_Deaths); break;
-	case ACC_POLICE_LEVEL:				str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_PoliceLevel); break;
-	case ACC_SURVIVAL_KILLS:			str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_SurvivalKills); break;
-	case ACC_SURVIVAL_WINS:				str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_SurvivalWins); break;
-	case ACC_SPOOKY_GHOST:				str_format(aBuf, sizeof(aBuf), "%d", (int)m_Accounts[ID].m_SpookyGhost); break;
-	case ACC_LAST_MONEY_TRANSACTION_0:	str_copy(aBuf, m_Accounts[ID].m_aLastMoneyTransaction[0], sizeof(aBuf)); break;
-	case ACC_LAST_MONEY_TRANSACTION_1:	str_copy(aBuf, m_Accounts[ID].m_aLastMoneyTransaction[1], sizeof(aBuf)); break;
-	case ACC_LAST_MONEY_TRANSACTION_2:	str_copy(aBuf, m_Accounts[ID].m_aLastMoneyTransaction[2], sizeof(aBuf)); break;
-	case ACC_LAST_MONEY_TRANSACTION_3:	str_copy(aBuf, m_Accounts[ID].m_aLastMoneyTransaction[3], sizeof(aBuf)); break;
-	case ACC_LAST_MONEY_TRANSACTION_4:	str_copy(aBuf, m_Accounts[ID].m_aLastMoneyTransaction[4], sizeof(aBuf)); break;
-	case ACC_VIP:						str_format(aBuf, sizeof(aBuf), "%d", (int)m_Accounts[ID].m_VIP); break;
-	case ACC_BLOCK_POINTS:				str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_BlockPoints); break;
-	case ACC_INSTAGIB_KILLS:			str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_InstagibKills); break;
-	case ACC_INSTAGIB_WINS:				str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_InstagibWins); break;
-	case ACC_SPAWN_WEAPON_0:			str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_SpawnWeapon[0]); break;
-	case ACC_SPAWN_WEAPON_1:			str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_SpawnWeapon[1]); break;
-	case ACC_SPAWN_WEAPON_2:			str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_SpawnWeapon[2]); break;
-	case ACC_NINJAJETPACK:				str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_Ninjajetpack); break;
-	case ACC_LAST_PLAYER_NAME:			str_copy(aBuf, m_Accounts[ID].m_aLastPlayerName, sizeof(aBuf)); break;
-	case ACC_SURVIVAL_DEATHS:			str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_SurvivalDeaths); break;
-	case ACC_INSTAGIB_DEATHS:			str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_InstagibDeaths); break;
-	case ACC_TASER_LEVEL:				str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_TaserLevel); break;
-	case ACC_KILLING_SPREE_RECORD:		str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_KillingSpreeRecord); break;
-	case ACC_EUROS:						str_format(aBuf, sizeof(aBuf), "%.2f", m_Accounts[ID].m_Euros); break;
-	case ACC_EXPIRE_DATE_VIP:			str_format(aBuf, sizeof(aBuf), "%lld", (int64)m_Accounts[ID].m_ExpireDateVIP); break;
-	case ACC_PORTAL_RIFLE:				str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_PortalRifle); break;
-	case ACC_EXPIRE_DATE_PORTAL_RIFLE:	str_format(aBuf, sizeof(aBuf), "%lld", (int64)m_Accounts[ID].m_ExpireDatePortalRifle); break;
-	case ACC_VERSION:					str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_Version); break;
-	case ACC_ADDR:						net_addr_str(&m_Accounts[ID].m_Addr, aBuf, sizeof(aBuf), true); break;
-	case ACC_LAST_ADDR:					net_addr_str(&m_Accounts[ID].m_LastAddr, aBuf, sizeof(aBuf), true); break;
-	case ACC_TASER_BATTERY:				str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_TaserBattery); break;
-	case ACC_CONTACT:					str_copy(aBuf, m_Accounts[ID].m_aContact, sizeof(aBuf)); break;
-	case ACC_TIMEOUT_CODE:				str_copy(aBuf, m_Accounts[ID].m_aTimeoutCode, sizeof(aBuf)); break;
-	case ACC_SECURITY_PIN:				str_copy(aBuf, m_Accounts[ID].m_aSecurityPin, sizeof(aBuf)); break;
-	case ACC_REGISTER_DATE:				str_format(aBuf, sizeof(aBuf), "%lld", (int64)m_Accounts[ID].m_RegisterDate); break;
-	case ACC_LAST_LOGIN_DATE:			str_format(aBuf, sizeof(aBuf), "%lld", (int64)m_Accounts[ID].m_LastLoginDate); break;
-	case ACC_FLAGS:						str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_Flags); break;
-	case ACC_EMAIL:						str_copy(aBuf, m_Accounts[ID].m_aEmail, sizeof(aBuf)); break;
-	case ACC_DESIGN:					str_copy(aBuf, m_Accounts[ID].m_aDesign, sizeof(aBuf)); break;
-	case ACC_PORTAL_BATTERY:			str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_PortalBattery); break;
-	case ACC_PORTAL_BLOCKER:			str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_PortalBlocker); break;
-	case ACC_VOTE_MENU_FLAGS:			str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_VoteMenuFlags); break;
-	case ACC_DURAK_WINS:				str_format(aBuf, sizeof(aBuf), "%d", m_Accounts[ID].m_DurakWins); break;
-	case ACC_DURAK_PROFIT:				str_format(aBuf, sizeof(aBuf), "%lld", m_Accounts[ID].m_DurakProfit); break;
-	case ACC_LANGUAGE:					str_copy(aBuf, m_Accounts[ID].m_aLanguage, sizeof(aBuf)); break;
-	}
-	return aBuf;
-}
-
-void CGameContext::Logout(int ID, bool Silent)
-{
-	if (ID < ACC_START)
-		return;
-
-	if (m_Accounts[ID].m_ClientID >= 0 && m_apPlayers[m_Accounts[ID].m_ClientID])
-		m_apPlayers[m_Accounts[ID].m_ClientID]->OnLogout();
-
-	m_Accounts[ID].m_LoggedIn = false;
-	m_Accounts[ID].m_ClientID = -1;
-	WriteAccountStats(ID);
-
-	if (!Silent)
-		dbg_msg("acc", "logged out account '%s'", m_Accounts[ID].m_Username);
-	FreeAccount(ID);
-}
-
-void CGameContext::LogoutAllAccounts()
-{
-	unsigned int Amount = m_Accounts.size();
-	for (unsigned int i = ACC_START; i < Amount; i++)
-		Logout(ACC_START);
-	dbg_msg("acc", "logged out all accounts");
-}
-
-bool CGameContext::Login(int ClientID, const char *pUsername, const char *pPassword, bool PasswordRequired, bool ForceDesignLoad)
-{
-	CPlayer *pPlayer = m_apPlayers[ClientID];
-	if (!pPlayer)
-		return false;
-
-	if (IsAccountSystemBanned(ClientID))
-		return false;
-
-	if (pPlayer->GetAccID() >= ACC_START)
-	{
-		SendChatTarget(ClientID, pPlayer->Localize("You are already logged in"));
-		return false;
-	}
-
-	int ID = AddAccount();
-	ReadAccountStats(ID, pUsername);
-
-	if (m_Accounts[ID].m_Username[0] == '\0')
-	{
-		SendChatTarget(ClientID, pPlayer->Localize("That account doesn't exist, please register first"));
-		FreeAccount(ID);
-		return false;
-	}
-
-	if (m_Accounts[ID].m_LoggedIn)
-	{
-		if (m_Accounts[ID].m_Port == Config()->m_SvPort)
-			SendChatTarget(ClientID, pPlayer->Localize("This account is already logged in"));
-		else
-			SendChatTarget(ClientID, pPlayer->Localize("This account is already logged in on another server"));
-		FreeAccount(ID);
-		return false;
-	}
-
-	if (m_Accounts[ID].m_Disabled)
-	{
-		SendChatTarget(ClientID, pPlayer->Localize("This account is disabled"));
-		FreeAccount(ID);
-		return false;
-	}
-
-	if (PasswordRequired && pPassword[0] && m_Accounts[ID].m_Version < 7)
-	{
-		char aPassword[SHA256_MAXSTRSIZE];
-		str_copy(aPassword, pPassword, sizeof(aPassword));
-		SHA256_CTX Sha256Ctx;
-		sha256_init(&Sha256Ctx);
-		sha256_update(&Sha256Ctx, &aPassword, sizeof(aPassword));
-		SHA256_DIGEST Sha256 = sha256_finish(&Sha256Ctx);
-		if (sha256_comp(m_Accounts[ID].m_Password, Sha256) == 0)
-			SetPassword(ID, pPassword);
-	}
-
-	if (PasswordRequired && CheckPassword(ID, pPassword))
-	{
-		SendChatTarget(ClientID, pPlayer->Localize("Wrong password"));
-		FreeAccount(ID);
-
-		ProcessAccountSystemBan(ClientID, ACC_SYS_LOGIN);
-		return false;
-	}
-
-	// set some variables and save the account with some new values
-	{
-		m_Accounts[ID].m_Port = Config()->m_SvPort;
-		m_Accounts[ID].m_LoggedIn = true;
-		m_Accounts[ID].m_ClientID = ClientID;
-		m_Accounts[ID].m_Version = ACC_CURRENT_VERSION;
-		str_copy(m_Accounts[ID].m_aLastPlayerName, Server()->ClientName(ClientID), sizeof(m_Accounts[ID].m_aLastPlayerName));
-		if (pPlayer->m_TimeoutCode[0] != '\0')
-			str_copy(m_Accounts[ID].m_aTimeoutCode, pPlayer->m_TimeoutCode, sizeof(m_Accounts[ID].m_aTimeoutCode));
-		time_t Now;
-		time(&Now);
-		m_Accounts[ID].m_LastLoginDate = Now;
-
-		NETADDR Addr;
-		Server()->GetClientAddr(ClientID, &Addr);
-		if (net_addr_comp(&Addr, &m_Accounts[ID].m_Addr, false) != 0)
-		{
-			// addresses are not equal, update last address and set new current address
-			m_Accounts[ID].m_LastAddr = m_Accounts[ID].m_Addr;
-			Server()->GetClientAddr(ClientID, &m_Accounts[ID].m_Addr);
-		}
-		else
-		{
-			// addresses are equal, just update the current address to get the possible changed port
-			Server()->GetClientAddr(ClientID, &m_Accounts[ID].m_Addr);
-		}
-
-		WriteAccountStats(ID);
-	}
-
-	pPlayer->OnLogin(ForceDesignLoad);
-	return true;
-}
-
-SHA256_DIGEST CGameContext::HashPassword(const char *pPassword)
-{
-	SHA256_CTX Sha256Ctx;
-	sha256_init(&Sha256Ctx);
-	sha256_update(&Sha256Ctx, pPassword, str_length(pPassword));
-	return sha256_finish(&Sha256Ctx);
-}
-
-void CGameContext::SetPassword(int ID, const char *pPassword)
-{
-	if (ID < ACC_START)
-		return;
-	m_Accounts[ID].m_Password = HashPassword(pPassword);
-}
-
-bool CGameContext::CheckPassword(int ID, const char *pPassword)
-{
-	if (ID < ACC_START)
-		return true;
-	return sha256_comp(m_Accounts[ID].m_Password, HashPassword(pPassword)) != 0;
-}
-
-int64 CGameContext::GetNeededXP(int Level)
-{
-	if (Level < 0)
-		return 0;
-	if (Level < DIFFERENCE_XP_END)
-		return m_aNeededXP[Level];
-	return m_aNeededXP[DIFFERENCE_XP_END-1] + (OVER_LVL_100_XP * (Level+1 - DIFFERENCE_XP_END));
-}
-
-int CGameContext::GetAccIDByUsername(const char *pUsername)
-{
-	for (unsigned int i = ACC_START; i < m_Accounts.size(); i++)
-		if (!str_comp(pUsername, m_Accounts[i].m_Username))
-			return i;
-	return 0;
-}
-
-int CGameContext::GetAccount(const char *pUsername)
-{
-	int ID = 0;
-	for (int i = 0; i < MAX_CLIENTS; i++)
-	{
-		if (m_apPlayers[i] && m_apPlayers[i]->GetAccID() >= ACC_START && !str_comp(m_Accounts[m_apPlayers[i]->GetAccID()].m_Username, pUsername))
-		{
-			ID = m_apPlayers[i]->GetAccID();
-			break;
-		}
-	}
-
-	if (ID < ACC_START)
-	{
-		ID = AddAccount();
-		ReadAccountStats(ID, pUsername);
-	}
-
-	if (m_Accounts[ID].m_Username[0] == '\0')
-	{
-		FreeAccount(ID);
-		return 0;
-	}
-
-	return ID;
-}
-
-void CGameContext::FreeAccount(int ID)
-{
-	m_Accounts.erase(m_Accounts.begin() + ID);
-}
-
-bool CGameContext::IsAccLoggedInThisPort(int ID)
-{
-	return m_Accounts[ID].m_LoggedIn && m_Accounts[ID].m_Port == Config()->m_SvPort;
-}
-
-void CGameContext::UpdateDesignList(int ID, const char *pMapDesign)
-{
-	std::vector<SSavedDesignEntry> vDesigns = GetDesignList(ID);
-
-	// Update the list
-	bool Found = false;
-	for (unsigned int i = 0; i < vDesigns.size(); i++)
-	{
-		if (str_comp(vDesigns[i].m_aMapName, Server()->GetCurrentMapName()) == 0)
-		{
-			// Update
-			str_copy(vDesigns[i].m_aDesign, pMapDesign, sizeof(vDesigns[i].m_aDesign));
-			Found = true;
-			break;
-		}
-	}
-
-	// Add if not found
-	if (!Found)
-	{
-		SSavedDesignEntry Entry;
-		str_copy(Entry.m_aDesign, pMapDesign, sizeof(Entry.m_aDesign));
-		str_copy(Entry.m_aMapName, Server()->GetCurrentMapName(), sizeof(Entry.m_aDesign));
-		vDesigns.push_back(Entry);
-	}
-
-	// Write list
-	m_Accounts[ID].m_aDesign[0] = '\0';
-	for (unsigned int i = 0; i < vDesigns.size(); i++)
-	{
-		// don't add default's to the list, waste
-		if (str_comp(vDesigns[i].m_aDesign, "default") == 0)
-			continue;
-
-		char aEntry[196];
-		str_format(aEntry, sizeof(aEntry), "%s:%s,", vDesigns[i].m_aMapName, vDesigns[i].m_aDesign);
-		str_append(m_Accounts[ID].m_aDesign, aEntry, sizeof(m_Accounts[ID].m_aDesign));
-	}
-}
-
-const char *CGameContext::GetCurrentDesignFromList(int ID)
-{
-	static char aBuf[128];
-	str_copy(aBuf, "default", sizeof(aBuf));
-
-	std::vector<SSavedDesignEntry> vDesigns = GetDesignList(ID);
-	for (unsigned int i = 0; i < vDesigns.size(); i++)
-	{
-		if (str_comp(vDesigns[i].m_aMapName, Server()->GetCurrentMapName()) == 0)
-		{
-			str_copy(aBuf, vDesigns[i].m_aDesign, sizeof(aBuf));
-			break;
-		}
-	}
-	return aBuf;
-}
-
-std::vector<CGameContext::SSavedDesignEntry> CGameContext::GetDesignList(int ID)
-{
-	std::vector<SSavedDesignEntry> vDesigns;
-	if (ID < ACC_START)
-		return vDesigns;
-
-	const char *pList = m_Accounts[ID].m_aDesign;
-	while (1)
-	{
-		if (!pList || !pList[0])
-			break;
-
-		SSavedDesignEntry Entry;
-		Entry.m_aMapName[0] = '\0';
-		Entry.m_aDesign[0] = '\0';
-		sscanf(pList, "%[^:]:%[^,]", Entry.m_aMapName, Entry.m_aDesign);
-		if (Entry.m_aMapName[0] && Entry.m_aDesign[0])
-		{
-			vDesigns.push_back(Entry);
-		}
-
-		// jump to next comma, if it exists skip it so we can start the next loop run with the next data
-		if ((pList = str_find(pList, ",")))
-			pList++;
-	}
-
-	return vDesigns;
-}
-
 const char *CGameContext::GetDate(time_t Time, bool ShowTime)
 {
 	if (Time < 0)
@@ -6598,62 +5502,6 @@ const char *CGameContext::GetDate(time_t Time, bool ShowTime)
 	}
 
 	return aBuf;
-}
-
-void CGameContext::WriteDonationFile(int Type, float Amount, int ID, const char *pDescription)
-{
-	const char* pFrom = Type == TYPE_DONATION ? "donation" : Type == TYPE_PURCHASE ? "purchase" : "";
-	char aBuf[256], aMsg[256];
-	time_t Now = time(0);
-	str_format(aMsg, sizeof(aMsg), "Date: %s, Euros: %.2f, Account: '%s', Description: '%s'", GetDate(Now, false), Amount, m_Accounts[ID].m_Username, pDescription);
-	Console()->Format(aBuf, sizeof(aBuf), pFrom, aMsg);
-
-	char aFile[256];
-	str_format(aFile, sizeof(aFile), "%s/donations.txt", Config()->m_SvDonationFilePath);
-	std::ofstream DonationsFile(aFile, std::ios_base::app | std::ios_base::out);
-	DonationsFile << aBuf << "\n";
-}
-
-void CGameContext::ReadMoneyListFile()
-{
-	std::string data;
-	char aBuf[128];
-	str_format(aBuf, sizeof(aBuf), "%s/%s/moneydrops.txt", Config()->m_SvMoneyDropsFilePath, Server()->GetCurrentMapName());
-	std::fstream MoneyDropsFile(aBuf);
-	getline(MoneyDropsFile, data);
-	const char *pStr = data.c_str();
-
-	while (1)
-	{
-		if (!pStr)
-			break;
-
-		vec2 Pos = vec2(-1, -1);
-		int Amount = 0;
-
-		sscanf(pStr, "%f/%f:%d", &Pos.x, &Pos.y, &Amount);
-		if (Amount > 0)
-			new CMoney(&m_World, vec2(Pos.x*32.f, Pos.y*32.f), Amount);
-
-		// jump to next comma, if it exists skip it so we can start the next loop run with the next money data
-		if ((pStr = str_find(pStr, ",")))
-			pStr++;
-	}
-}
-
-void CGameContext::WriteMoneyListFile()
-{
-	char aFile[256];
-	str_format(aFile, sizeof(aFile), "%s/%s/moneydrops.txt", Config()->m_SvMoneyDropsFilePath, Server()->GetCurrentMapName());
-	std::ofstream MoneyDropsFile(aFile);
-
-	CMoney *pMoney = (CMoney *)m_World.FindFirst(CGameWorld::ENTTYPE_MONEY);
-	for (; pMoney; pMoney = (CMoney *)pMoney->TypeNext())
-	{
-		char aEntry[64];
-		str_format(aEntry, sizeof(aEntry), "%.2f/%.2f:%d,", pMoney->GetPos().x/32.f, pMoney->GetPos().y/32.f, pMoney->GetAmount());
-		MoneyDropsFile << aEntry;
-	}
 }
 
 void CGameContext::ReadSavedPlayersFile()
@@ -6783,6 +5631,15 @@ int CGameContext::SaveCharacter(int ClientID, int Flags, float Hours)
 		}
 	}
 
+	if (pChr->IsInSafeArea())
+	{
+		pChr->SetSafeArea(false);
+		if (!(Flags & SAVE_REDIRECT))
+		{
+			pChr->SetInGame(false);
+		}
+	}
+
 	if (Flags & SAVE_REDIRECT)
 	{
 		// reset solo so it cant be taken to another map
@@ -6793,7 +5650,7 @@ int CGameContext::SaveCharacter(int ClientID, int Flags, float Hours)
 	SSavedIdentity Info;
 	Server()->GetClientAddr(ClientID, &Info.m_Addr);
 	str_copy(Info.m_aName, Server()->ClientName(ClientID), sizeof(Info.m_aName));
-	str_copy(Info.m_aAccUsername, m_Accounts[m_apPlayers[ClientID]->GetAccID()].m_Username, sizeof(Info.m_aAccUsername));
+	str_copy(Info.m_aAccUsername, m_Accounts.Get(m_apPlayers[ClientID]->GetAccID()).m_Username, sizeof(Info.m_aAccUsername));
 	Info.m_TeeInfo = m_apPlayers[ClientID]->m_TeeInfos;
 	str_copy(Info.m_aTimeoutCode, m_apPlayers[ClientID]->m_TimeoutCode, sizeof(Info.m_aTimeoutCode));
 	Info.m_ExpireDate = 0;
@@ -6826,7 +5683,12 @@ int CGameContext::SaveCharacter(int ClientID, int Flags, float Hours)
 		m_apPlayers[ClientID]->m_EscapeTime = 0;
 		m_apPlayers[ClientID]->m_JailTime = 0;
 	}
-	
+	if (Flags & SAVE_SHUTDOWN)
+	{
+		// Reset, so CPlayer::OnDisconnect() will not create a disconnect savetee when we have this already.
+		m_apPlayers[ClientID]->m_SavePlayerDisconnect = false;
+	}
+
 	// return index of newly added identity
 	return m_vSavedIdentities.size() - 1;
 }
@@ -6853,13 +5715,14 @@ int CGameContext::FindSavedPlayer(int ClientID)
 
 		bool SameAddr = net_addr_comp(&Addr, &Info.m_Addr, false) == 0;
 		bool SameTimeoutCode = Info.m_aTimeoutCode[0] != '\0' && str_comp(Info.m_aTimeoutCode, m_apPlayers[ClientID]->m_TimeoutCode) == 0;
-		bool SameAcc = Info.m_aAccUsername[0] != '\0' && str_comp(Info.m_aAccUsername, m_Accounts[m_apPlayers[ClientID]->GetAccID()].m_Username) == 0;
+		bool SameAcc = Info.m_aAccUsername[0] != '\0' && str_comp(Info.m_aAccUsername, m_Accounts.Get(m_apPlayers[ClientID]->GetAccID()).m_Username) == 0;
 		bool SameName = str_comp(Info.m_aName, Server()->ClientName(ClientID)) == 0;
-		bool SameTeeInfo = mem_comp(&Info.m_TeeInfo, &m_apPlayers[ClientID]->m_TeeInfos, sizeof(CTeeInfo)) == 0;
+		//bool SameTeeInfo = mem_comp(&Info.m_TeeInfo, &m_apPlayers[ClientID]->m_TeeInfos, sizeof(CTeeInfo)) == 0;
 
 		// SameTeeInfo is not really used, since players with the same skin and ip would get fucked up otherwise, in CSaveTee::Save() the identity of e.g. dummy would get saved then
 		bool SameClientInfo = SameAddr && SameName;
-		SameAcc = SameAcc && (SameAddr || SameName || SameTeeInfo || SameTimeoutCode);
+		// always match account for extensive bypassing
+		//SameAcc = SameAcc && (SameAddr || SameName || SameTeeInfo || SameTimeoutCode);
 		if (SameAddrAndPort || SameAcc || SameTimeoutCode || SameClientInfo)
 		{
 			Found = i;
@@ -6895,10 +5758,10 @@ const char *CGameContext::GetSavedIdentityHash(SSavedIdentity Info)
 	return aSha256;
 }
 
-bool CGameContext::CheckLoadPlayer(int ClientID)
+bool CGameContext::CheckLoadPlayer(int ClientID, bool Force)
 {
 	// dont load two saves for one tee, because they are probably two clients with identical information, sending a info change can cause a second load, of the tee thats the 2nd client
-	if (!m_apPlayers[ClientID] || m_apPlayers[ClientID]->m_LoadedSavedPlayer)
+	if (!m_apPlayers[ClientID] || (!Force && m_apPlayers[ClientID]->m_LoadedSavedPlayer))
 		return false;
 
 	int Index = FindSavedPlayer(ClientID);
@@ -6985,7 +5848,7 @@ void CGameContext::SendPlayerCountUpdate(bool Shutdown)
 	Server()->SendPlayerCountUpdate(Shutdown);
 }
 
-int CGameContext::GetRediretListPort(int WantedSwitchNumber)
+int CGameContext::GetRedirectListPort(int WantedSwitchNumber)
 {
 	const char *pList = Config()->m_SvRedirectServerTilePorts;
 	char aBuf[16];
@@ -7001,7 +5864,7 @@ int CGameContext::GetRediretListPort(int WantedSwitchNumber)
 	return 0;
 }
 
-int CGameContext::GetRediretListSwitch(int WantedPort)
+int CGameContext::GetRedirectListSwitch(int WantedPort)
 {
 	const char *pList = Config()->m_SvRedirectServerTilePorts;
 	char aBuf[16];
@@ -7057,37 +5920,6 @@ void CGameContext::CreateFolders()
 	Storage()->CreateFolder(aPath, IStorage::TYPE_SAVE);
 	str_format(aPath, sizeof(aPath), "dumps/%s/x_redirect_tile", Config()->m_SvSavedTeesFilePath);
 	Storage()->CreateFolder(aPath, IStorage::TYPE_SAVE);
-}
-
-bool CGameContext::SameIP(int ClientID1, int ClientID2)
-{
-	if (ClientID1 < 0 || ClientID1 >= MAX_CLIENTS || ClientID2 < 0 || ClientID2 >= MAX_CLIENTS || !m_apPlayers[ClientID1] || !m_apPlayers[ClientID2])
-		return false;
-
-	NETADDR Addr1, Addr2;
-	Server()->GetClientAddr(ClientID1, &Addr1);
-	Server()->GetClientAddr(ClientID2, &Addr2);
-
-	bool Same = (net_addr_comp(&Addr1, &Addr2, false) == 0);
-
-	int AccID1 = m_apPlayers[ClientID1]->GetAccID();
-	if (AccID1 >= ACC_START)
-		Same = Same || (net_addr_comp(&Addr2, &m_Accounts[AccID1].m_LastAddr, false) == 0);
-
-	int AccID2 = m_apPlayers[ClientID2]->GetAccID();
-	if (AccID2 >= ACC_START)
-		Same = Same || (net_addr_comp(&Addr1, &m_Accounts[AccID2].m_LastAddr, false) == 0);
-
-	return Same;
-}
-
-bool CGameContext::SameIP(int AccID, const NETADDR *pAddr)
-{
-	if (AccID < ACC_START)
-		return false;
-
-	return (net_addr_comp(pAddr, &m_Accounts[AccID].m_Addr, false) == 0
-		|| net_addr_comp(pAddr, &m_Accounts[AccID].m_LastAddr, false) == 0);
 }
 
 int CGameContext::GetNextClientID()
@@ -7177,7 +6009,7 @@ bool CGameContext::LineShouldHighlight(const char *pLine, const char *pName)
 	return false;
 }
 
-bool CGameContext::JailPlayer(int ClientID, int Seconds)
+bool CGameContext::JailPlayer(int ClientID, int Seconds, int ModLogID)
 {
 	CPlayer *pPlayer = m_apPlayers[ClientID];
 	if (!pPlayer || Seconds <= 0)
@@ -7189,12 +6021,22 @@ bool CGameContext::JailPlayer(int ClientID, int Seconds)
 	pPlayer->m_JailTime = Server()->TickSpeed() * Seconds;
 	pPlayer->m_EscapeTime = 0;
 	if(pPlayer->GetCharacter())
+	{
 		pPlayer->KillCharacter(WEAPON_GAME);
+		pPlayer->Respawn();
+	}
 
 	// Force destroyendtick to be 1, so it can get resetted in the next tick and the owner gets the message aswell
-	int PlotID = GetPlotID(pPlayer->GetAccID());
-	if (PlotID >= PLOT_START)
-		m_aPlots[PlotID].m_DestroyEndTick = 1;
+	int PlotID = m_Plots.GetPlotID(pPlayer->GetAccID());
+	m_Plots.SetPlotDestroyEndTick(PlotID, 1);
+
+	if (ModLogID != -1)
+	{
+		char aBuf[128];
+		str_format(aBuf, sizeof(aBuf), "'%s' was arrested for %d seconds", Server()->ClientName(ClientID), Seconds);
+		Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "console", aBuf);
+		SendModLogMessage(ModLogID, aBuf);
+	}
 	return true;
 }
 
@@ -7257,127 +6099,6 @@ vec2 CGameContext::RoundPos(vec2 Pos)
 	Pos.x -= (int)Pos.x % 32 - 16;
 	Pos.y -= (int)Pos.y % 32 - 16;
 	return Pos;
-}
-
-bool CGameContext::TryAccountSystemBan(const NETADDR *pAddr, int Type, int Secs)
-{
-	// find a matching register ban for this ip, update expiration time if found
-	for(int i = 0; i < m_NumAccountSystemBans; i++)
-	{
-		if(net_addr_comp(&m_aAccountSystemBans[i].m_Addr, pAddr, false) == 0)
-		{
-			m_aAccountSystemBans[i].m_LastAttempt = Server()->Tick();
-
-			bool Ban = false;
-			switch (Type)
-			{
-			case ACC_SYS_REGISTER:
-			{
-				m_aAccountSystemBans[i].m_NumRegistrations++;
-				Ban = m_aAccountSystemBans[i].m_NumRegistrations > Config()->m_SvAccSysBanRegistrations;
-				break;
-			}
-			case ACC_SYS_LOGIN:
-			{
-				m_aAccountSystemBans[i].m_NumFailedLogins++;
-				Ban = m_aAccountSystemBans[i].m_NumFailedLogins > Config()->m_SvAccSysBanPwFails;
-				break;
-			}
-			case ACC_SYS_PIN:
-			{
-				m_aAccountSystemBans[i].m_NumFailedPins++;
-				Ban = m_aAccountSystemBans[i].m_NumFailedPins > Config()->m_SvAccSysBanPinFails;
-				break;
-			}
-			}
-
-			if (Ban)
-			{
-				m_aAccountSystemBans[i].m_Expire = Server()->Tick() + Secs * Server()->TickSpeed();
-				return true;
-			}
-			return false;
-		}
-	}
-
-	// nothing to update create new one
-	if(m_NumAccountSystemBans < MAX_ACC_SYS_BANS)
-	{
-		m_aAccountSystemBans[m_NumAccountSystemBans].m_Addr = *pAddr;
-		m_aAccountSystemBans[m_NumAccountSystemBans].m_Expire = 0;
-		m_aAccountSystemBans[m_NumAccountSystemBans].m_LastAttempt = Server()->Tick();
-
-		switch (Type)
-		{
-		case ACC_SYS_REGISTER: m_aAccountSystemBans[m_NumAccountSystemBans].m_NumRegistrations = 1; break;
-		case ACC_SYS_LOGIN: m_aAccountSystemBans[m_NumAccountSystemBans].m_NumFailedLogins = 1; break;
-		case ACC_SYS_PIN: m_aAccountSystemBans[m_NumAccountSystemBans].m_NumFailedPins = 1; break;
-		}
-
-		m_NumAccountSystemBans++;
-		return false;
-	}
-	// no free slot found
-	Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "acc", "account system ban array is full");
-	return false;
-}
-
-int CGameContext::ProcessAccountSystemBan(int ClientID, int Type)
-{
-	if(!m_apPlayers[ClientID])
-		return 0;
-
-	if (IsAccountSystemBanned(ClientID, true))
-		return 1;
-
-	NETADDR Addr;
-	Server()->GetClientAddr(ClientID, &Addr);
-	if (TryAccountSystemBan(&Addr, Type, ACC_SYS_BAN_DELAY))
-	{
-		const char *pReason = "";
-		switch (Type)
-		{
-		case ACC_SYS_REGISTER: pReason = m_apPlayers[ClientID]->Localize("Registration spam"); break;
-		case ACC_SYS_LOGIN: pReason = m_apPlayers[ClientID]->Localize("Too many login fails"); break;
-		case ACC_SYS_PIN: pReason = m_apPlayers[ClientID]->Localize("Too many pin fails"); break;
-		}
-
-		char aBuf[128];
-		str_format(aBuf, sizeof aBuf, m_apPlayers[ClientID]->Localize("You have been banned from the account system for %d seconds (%s)"), ACC_SYS_BAN_DELAY, pReason);
-		SendChatTarget(ClientID, aBuf);
-		return 1;
-	}
-
-	return 0;
-}
-
-bool CGameContext::IsAccountSystemBanned(int ClientID, bool ChatMsg)
-{
-	if(!m_apPlayers[ClientID])
-		return false;
-
-	NETADDR Addr;
-	Server()->GetClientAddr(ClientID, &Addr);
-	int AccountSystemBanned = 0;
-
-	for(int i = 0; i < m_NumAccountSystemBans; i++)
-	{
-		if(net_addr_comp(&Addr, &m_aAccountSystemBans[i].m_Addr, false) == 0)
-		{
-			AccountSystemBanned = (m_aAccountSystemBans[i].m_Expire - Server()->Tick()) / Server()->TickSpeed();
-			break;
-		}
-	}
-
-	if (AccountSystemBanned > 0)
-	{
-		char aBuf[128];
-		str_format(aBuf, sizeof aBuf, m_apPlayers[ClientID]->Localize("You are banned from the account system for the next %d seconds."), AccountSystemBanned);
-		SendChatTarget(ClientID, aBuf);
-		return true;
-	}
-
-	return false;
 }
 
 const char *CGameContext::AppendMotdFooter(const char *pMsg, const char *pFooter)
@@ -7536,7 +6257,7 @@ void CGameContext::CalcScreenParams(float Aspect, float Zoom, float *w, float *h
 	*h *= Zoom;
 }
 
-void CGameContext::SnapSelectedArea(CSelectedArea *pSelectedArea)
+void CGameContext::SnapSelectedArea(CSelectedArea *pSelectedArea, const CSnapContext &Context)
 {
 	vec2 TopLeft = pSelectedArea->TopLeft();
 	vec2 BottomRight = pSelectedArea->BottomRight();
@@ -7544,17 +6265,172 @@ void CGameContext::SnapSelectedArea(CSelectedArea *pSelectedArea)
 
 	for (int i = 0; i < 4; i++)
 	{
-		CNetObj_Laser *pObj = static_cast<CNetObj_Laser *>(Server()->SnapNewItem(NETOBJTYPE_LASER, pSelectedArea->m_aID[i], sizeof(CNetObj_Laser)));
-		if (!pObj)
-			return;
-
 		int To = i == 3 ? 0 : i+1;
-		pObj->m_X = round_to_int(aPoints[i].x);
-		pObj->m_Y = round_to_int(aPoints[i].y);
-		pObj->m_FromX = round_to_int(aPoints[To].x);
-		pObj->m_FromY = round_to_int(aPoints[To].y);
-		pObj->m_StartTick = Server()->Tick() - 2;
+		SnapLaserObject(Context, pSelectedArea->m_aID[i], aPoints[i], aPoints[To], Server()->Tick() - 2, Context.ClientId(), LASERTYPE_RIFLE, -1, -1, LASERFLAG_NO_PREDICT);
 	}
+}
+
+bool CGameContext::SnapLaserObject(const CSnapContext &Context, int SnapId, const vec2 &To, const vec2 &From, int StartTick, int Owner, int LaserType, int Subtype, int SwitchNumber, int Flags) const
+{
+	if(Context.GetClientVersion() >= VERSION_DDNET_MULTI_LASER)
+	{
+		CNetObj_DDNetLaser *pObj = static_cast<CNetObj_DDNetLaser *>(Server()->SnapNewItem(NETOBJTYPE_DDNETLASER, SnapId, sizeof(CNetObj_DDNetLaser)));
+		if(!pObj)
+			return false;
+
+		int TranslatedOwner = Owner;
+		if (!Server()->Translate(TranslatedOwner, Context.ClientId()))
+			TranslatedOwner = -1;
+
+		pObj->m_ToX = round_to_int(To.x);
+		pObj->m_ToY = round_to_int(To.y);
+		pObj->m_FromX = round_to_int(From.x);
+		pObj->m_FromY = round_to_int(From.y);
+		pObj->m_StartTick = StartTick;
+		pObj->m_Owner = TranslatedOwner;
+		pObj->m_Type = LaserType;
+		pObj->m_Subtype = Subtype;
+		pObj->m_SwitchNumber = SwitchNumber;
+		pObj->m_Flags = Flags;
+	}
+	else
+	{
+		CNetObj_Laser *pObj = static_cast<CNetObj_Laser *>(Server()->SnapNewItem(NETOBJTYPE_LASER, SnapId, sizeof(CNetObj_Laser)));
+		if(!pObj)
+			return false;
+
+		pObj->m_X = round_to_int(To.x);
+		pObj->m_Y = round_to_int(To.y);
+		pObj->m_FromX = round_to_int(From.x);
+		pObj->m_FromY = round_to_int(From.y);
+		pObj->m_StartTick = StartTick;
+	}
+
+	return true;
+}
+
+bool CGameContext::SnapPickupObject(const CSnapContext &Context, int SnapId, const vec2 &Pos, int Type, int SubType, int SwitchNumber, int Flags) const
+{
+	if (!Context.IsSevendown() || Context.GetClientVersion() < VERSION_DDNET_ENTITY_NETOBJS)
+	{
+		int Size = Context.IsSevendown() ? 4*4 : sizeof(CNetObj_Pickup);
+		CNetObj_Pickup* pP = static_cast<CNetObj_Pickup*>(Server()->SnapNewItem(NETOBJTYPE_PICKUP, SnapId, Size));
+		if (!pP)
+			return false;
+
+		pP->m_X = round_to_int(Pos.x);
+		pP->m_Y = round_to_int(Pos.y);
+		if (Context.IsSevendown())
+		{
+			int RealSubtype = GetWeaponType(SubType);
+			pP->m_Type = RealSubtype == WEAPON_NINJA ? POWERUP_NINJA : Type;
+			((int*)pP)[3] = RealSubtype;
+		}
+		else
+			pP->m_Type = GetPickupType(Type, SubType);
+	}
+	else
+	{
+		CNetObj_DDNetPickup *pPickup = static_cast<CNetObj_DDNetPickup*>(Server()->SnapNewItem(NETOBJTYPE_DDNETPICKUP, SnapId, sizeof(CNetObj_DDNetPickup)));
+		if(!pPickup)
+			return false;
+
+		pPickup->m_X = round_to_int(Pos.x);
+		pPickup->m_Y = round_to_int(Pos.y);
+		int RealSubtype = GetWeaponType(SubType);
+		pPickup->m_Subtype = RealSubtype;
+		pPickup->m_Type = RealSubtype == WEAPON_NINJA ? POWERUP_NINJA : Type;
+		pPickup->m_SwitchNumber = SwitchNumber;
+		pPickup->m_Flags = Flags;
+	}
+
+	return true;
+}
+
+bool CGameContext::SnapPickup(const CSnapContext &Context, int SnapId, const vec2 &Pos, int Type, int SubType, int SwitchNumber, int Flags, int Special, int aExtraIds[4]) const
+{
+	if (Type == POWERUP_BATTERY)
+	{
+		CNetObj_Projectile* pProj = static_cast<CNetObj_Projectile*>(Server()->SnapNewItem(NETOBJTYPE_PROJECTILE, SnapId, sizeof(CNetObj_Projectile)));
+		if (!pProj)
+			return false;
+
+		pProj->m_X = round_to_int(Pos.x);
+		pProj->m_Y = round_to_int(Pos.y);
+
+		pProj->m_VelX = 0;
+		pProj->m_VelY = 0;
+		pProj->m_StartTick = 0;
+		pProj->m_Type = WEAPON_LASER;
+	}
+	else
+	{
+		SnapPickupObject(Context, SnapId, Pos, Type, SubType, SwitchNumber, Flags);
+	}
+
+	bool Gun = (SubType == WEAPON_GUN && (Special&SPECIAL_JETPACK || Special&SPECIAL_TELEWEAPON)) || SubType == WEAPON_PROJECTILE_RIFLE || (SubType == WEAPON_HAMMER && (Special&SPECIAL_DOORHAMMER || Special&SPECIAL_PPROJECTILEHAMMER));
+	bool Plasma = SubType == WEAPON_PLASMA_RIFLE || SubType == WEAPON_LIGHTSABER || SubType == WEAPON_PORTAL_RIFLE || SubType == WEAPON_TELE_RIFLE
+		|| SubType == WEAPON_LIGHTNING_LASER || (SubType == WEAPON_LASER && Special&SPECIAL_TELEWEAPON) || (SubType == WEAPON_TASER && Type == POWERUP_WEAPON);
+	bool Heart = SubType == WEAPON_HEART_GUN;
+	bool Grenade = SubType == WEAPON_STRAIGHT_GRENADE || SubType == WEAPON_BALL_GRENADE || (SubType == WEAPON_GRENADE && Special&SPECIAL_TELEWEAPON);
+
+	int ExtraBulletOffset = 30;
+	int SpreadOffset = -20;
+	if (Special&SPECIAL_SPREADWEAPON && (Gun || Plasma || Heart || Grenade))
+		ExtraBulletOffset = 50;
+
+	if (Special&SPECIAL_SPREADWEAPON)
+	{
+		for (int i = 1; i < 4; i++)
+		{
+			CNetObj_Projectile* pSpreadIndicator = static_cast<CNetObj_Projectile*>(Server()->SnapNewItem(NETOBJTYPE_PROJECTILE, aExtraIds[i], sizeof(CNetObj_Projectile)));
+			if (!pSpreadIndicator)
+				return false;
+
+			pSpreadIndicator->m_X = round_to_int(Pos.x + SpreadOffset);
+			pSpreadIndicator->m_Y = round_to_int(Pos.y - 30);
+			pSpreadIndicator->m_Type = WEAPON_SHOTGUN;
+			pSpreadIndicator->m_StartTick = 0;
+
+			SpreadOffset += 20;
+		}
+	}
+
+	if (Gun)
+	{
+		CNetObj_Projectile* pShotgunBullet = static_cast<CNetObj_Projectile*>(Server()->SnapNewItem(NETOBJTYPE_PROJECTILE, aExtraIds[0], sizeof(CNetObj_Projectile)));
+		if (!pShotgunBullet)
+			return false;
+
+		pShotgunBullet->m_X = round_to_int(Pos.x);
+		pShotgunBullet->m_Y = round_to_int(Pos.y - ExtraBulletOffset);
+		pShotgunBullet->m_Type = WEAPON_SHOTGUN;
+		pShotgunBullet->m_StartTick = 0;
+	}
+	else if (Plasma)
+	{
+		vec2 LaserPos = vec2(Pos.x, Pos.y - ExtraBulletOffset);
+		int LaserType = (SubType == WEAPON_TASER || SubType == WEAPON_LIGHTNING_LASER) ? LASERTYPE_FREEZE : LASERTYPE_RIFLE;
+		SnapLaserObject(Context, aExtraIds[0], LaserPos, LaserPos, Server()->Tick(), -1, LaserType, -1, -1, LASERFLAG_NO_PREDICT);
+	}
+	else if (Heart)
+	{
+		vec2 HeartPos = vec2(Pos.x, Pos.y - ExtraBulletOffset);
+		SnapPickupObject(Context, aExtraIds[0], HeartPos, POWERUP_HEALTH, 0, -1, PICKUPFLAG_NO_PREDICT);
+	}
+	else if (Grenade)
+	{
+		CNetObj_Projectile* pProj = static_cast<CNetObj_Projectile*>(Server()->SnapNewItem(NETOBJTYPE_PROJECTILE, aExtraIds[0], sizeof(CNetObj_Projectile)));
+		if (!pProj)
+			return false;
+
+		pProj->m_X = round_to_int(Pos.x);
+		pProj->m_Y = round_to_int(Pos.y - ExtraBulletOffset);
+		pProj->m_StartTick = Server()->Tick() - 2;
+		pProj->m_Type = WEAPON_GRENADE;
+	}
+
+	return true;
 }
 
 void CGameContext::ConnectDummy(int DummyMode, vec2 Pos)
@@ -7736,25 +6612,50 @@ CLaserText *CGameContext::CreateLaserText(vec2 Pos, int Owner, const char *pText
 	return new CLaserText(&m_World, Pos, Owner, Seconds > 0 ? Server()->TickSpeed() * Seconds : -1, pText, (int)(strlen(pText)));
 }
 
-bool CGameContext::SpawnHelicopter(int Spawner, int Team, vec2 Pos, int TurretType, float Scale, bool SpawnOnFloor)
+bool CGameContext::SpawnSpider(int Spawner, int Team, vec2 Pos, float Scale, bool SpawnOnFloor, int Number)
 {
-	Scale = clamp(Scale, HELICOPTER_MIN_SCALE, HELICOPTER_MAX_SCALE);
-	vec2 ResultingHitbox = HELICOPTER_PHYSSIZE * Scale;
+	Scale = clamp(Scale, SPIDER_MIN_SCALE, SPIDER_MAX_SCALE);
+	vec2 ResultingHitbox = IVehicle::MinimumVehicleHitbox(SPIDER_PHYSSIZE * Scale);
+	ResultingHitbox = vec2(maximum(ResultingHitbox.x, 28.0f), maximum(ResultingHitbox.y, 28.0f));
 	if (SpawnOnFloor)
 		Pos.y -= ResultingHitbox.y / 2.f - CCharacterCore::PHYS_SIZE / 2.f;
 
 	if (Collision()->TestBoxBig(Pos, ResultingHitbox))
 		return false;
 
-	CHelicopter *pHelicopter = new CHelicopter(&m_World, Spawner, Team, Pos, Scale, true);
-	CVehicleTurret *pTurret = nullptr;
-	if (TurretType == TURRETTYPE_MINIGUN)
-		pTurret = new CMinigunTurret();
-	else if (TurretType == TURRETTYPE_LAUNCHER)
-		pTurret = new CLauncherTurret();
+	new CSpider(&m_World, Spawner, Team, Pos, Scale, Server()->TickSpeed() * 1, Number);
 
-	if (!pHelicopter->AttachTurret(pTurret))
-		delete pTurret; // Failed to assign ownership
+	return true;
+}
+
+bool CGameContext::SpawnHelicopter(int Spawner, int Team, vec2 Pos, int HelicopterType, int TurretType, float Scale, bool SpawnOnFloor, int Number)
+{
+	Scale = clamp(Scale, HELICOPTER_MIN_SCALE, HELICOPTER_MAX_SCALE);
+	vec2 ResultingHitbox = IVehicle::MinimumVehicleHitbox(HELICOPTER_PHYSSIZE * Scale);
+	if (SpawnOnFloor)
+		Pos.y -= ResultingHitbox.y / 2.f - CCharacterCore::PHYS_SIZE / 2.f;
+
+	if (Collision()->TestBoxBig(Pos, ResultingHitbox))
+		return false;
+
+	if (HelicopterType < 0 || HelicopterType >= NUM_HELICOPTER_TYPES)
+		return false;
+
+	CHelicopter *pHelicopter = new CHelicopter(&m_World, HelicopterType, Spawner, Team, Pos, Scale, Server()->TickSpeed() * 1, Number, TurretType);
+	if (TurretType > TURRETTYPE_NONE && TurretType < NUM_TURRET_TYPES)
+	{
+		pHelicopter->AllocateNumAttachments(1);
+
+		IVehicleTurret *pTurret = nullptr;
+		if (TurretType == TURRETTYPE_MINIGUN)
+			pTurret = new CMinigunTurret();
+		else if (TurretType == TURRETTYPE_LAUNCHER)
+			pTurret = new CLauncherTurret();
+
+		if (!pHelicopter->TryAttach(pTurret))
+			delete pTurret; // Failed to assign ownership
+	}
+
 	return true;
 }
 
@@ -7815,7 +6716,7 @@ void CGameContext::UnsetKiller(int ClientID)
 
 void CGameContext::OnSetTimedOut(int ClientID, int OrigID)
 {
-	m_World.InitPlayerMap(ClientID, true);
+	m_World.InitPlayerMap(ClientID, true, true);
 }
 
 bool CGameContext::FlagsUsed()
@@ -7888,7 +6789,7 @@ const char *CGameContext::GetWeaponName(int Weapon)
 	return "Unknown";
 }
 
-int CGameContext::GetWeaponType(int Weapon)
+int CGameContext::GetWeaponType(int Weapon) const
 {
 	switch (Weapon)
 	{
@@ -7920,7 +6821,7 @@ int CGameContext::GetWeaponType(int Weapon)
 	return Weapon;
 }
 
-int CGameContext::GetProjectileType(int Weapon)
+int CGameContext::GetProjectileType(int Weapon) const
 {
 	switch (Weapon)
 	{
@@ -7934,7 +6835,7 @@ int CGameContext::GetProjectileType(int Weapon)
 	return Weapon;
 }
 
-int CGameContext::GetPickupType(int Type, int Subtype)
+int CGameContext::GetPickupType(int Type, int Subtype) const
 {
 	if (Type == POWERUP_BATTERY)
 		return PICKUP_LASER;
@@ -7960,6 +6861,12 @@ int CGameContext::GetPickupType(int Type, int Subtype)
 		return PICKUP_NINJA;
 	}
 	return Subtype;
+}
+
+bool CGameContext::IsValidSpreadWeapon(int Type)
+{
+	return !(Type == WEAPON_HAMMER || Type == WEAPON_NINJA || Type == WEAPON_TELEKINESIS || Type == WEAPON_LIGHTSABER || Type == WEAPON_PORTAL_RIFLE
+		|| Type == WEAPON_DRAW_EDITOR || Type == WEAPON_TELE_RIFLE || Type == WEAPON_LIGHTNING_LASER);
 }
 
 void CGameContext::SendExtraMessage(int Extra, int ToID, bool Set, int FromID, bool Silent, int Special)
@@ -7995,7 +6902,7 @@ const char *CGameContext::CreateExtraMessage(int Extra, bool Set, int FromID, in
 	if (FromID == -1 || FromID == ToID)
 	{
 		if (Extra == JETPACK || Extra == ATOM || Extra == TRAIL || Extra == METEOR || Extra == INF_METEOR || Extra == SCROLL_NINJA || Extra == HOOK_POWER|| Extra == SPREAD_WEAPON
-			|| Extra == FREEZE_HAMMER || Extra == ITEM || Extra == TELE_WEAPON || Extra == DOOR_HAMMER || Extra == ROTATING_BALL || Extra == EPIC_CIRCLE || Extra == STAFF_IND)
+			|| Extra == FREEZE_HAMMER || Extra == ITEM || Extra == TELE_WEAPON || Extra == DOOR_HAMMER || Extra == PROJECTILE_HAMMER || Extra == ROTATING_BALL || Extra == EPIC_CIRCLE || Extra == STAFF_IND)
 			str_format(aMsg, sizeof(aMsg), "You %s %s", Set ? "have a" : "lost your", aItem);
 		else if (Extra == VANILLA_MODE || Extra == DDRACE_MODE)
 			str_format(aMsg, sizeof(aMsg), "You are now in %s", aItem);
@@ -8085,6 +6992,8 @@ const char *CGameContext::GetExtraName(int Extra, int Special)
 		return "Always Tele Weapon";
 	case DOOR_HAMMER:
 		return "Door Hammer";
+	case PROJECTILE_HAMMER:
+		return "Projectile Hammer";
 	case TEE_CONTROL:
 		return "Tee Control";
 	case SNAKE:
@@ -8269,9 +7178,7 @@ void CGameContext::SetMinigame(int ClientID, int Minigame, bool Force, bool DoCh
 		//reset everything
 		if (pPlayer->m_Minigame == MINIGAME_SURVIVAL)
 		{
-			pPlayer->m_Gamemode = pPlayer->m_SavedGamemode = GAMEMODE_DDRACE;
-			pPlayer->m_SurvivalState = SURVIVAL_OFFLINE;
-			pPlayer->m_ShowName = true;
+			Survival()->OnPlayerLeave(ClientID);
 		}
 		else if (pPlayer->m_Minigame == MINIGAME_1VS1)
 		{
@@ -8303,13 +7210,11 @@ void CGameContext::SetMinigame(int ClientID, int Minigame, bool Force, bool DoCh
 
 		if (Minigame == MINIGAME_SURVIVAL)
 		{
-			pPlayer->m_Gamemode = pPlayer->m_SavedGamemode = GAMEMODE_VANILLA;
-			pPlayer->m_SurvivalState = SURVIVAL_LOBBY;
+			Survival()->OnPlayerJoin(ClientID);
 		}
 		else if (Minigame == MINIGAME_1VS1)
 		{
-			SendChatTarget(ClientID, pPlayer->Localize("Type '/1vs1 <playername>' to start a fight with someone"));
-			SendChatTarget(ClientID, pPlayer->Localize("For custom scorelimits or a kill-border use '/1vs1 <playername> <scorelimit> <killborder>'"));
+			Arenas()->OnPlayerJoin(ClientID);
 		}
 	}
 	else
@@ -8328,259 +7233,6 @@ void CGameContext::SetMinigame(int ClientID, int Minigame, bool Force, bool DoCh
 
 	// Update the gameinfo, add or remove GAMEFLAG_RACE as wanted (in minigames we disable it to properly show the scores)
 	m_pController->UpdateGameInfo(ClientID);
-}
-
-void CGameContext::SurvivalTick()
-{
-	// if there are no spawn tiles, we cant play the game
-	if (!m_aMinigameDisabled[MINIGAME_SURVIVAL] && (!Collision()->TileUsed(TILE_SURVIVAL_LOBBY) || !Collision()->TileUsed(TILE_SURVIVAL_SPAWN) || !Collision()->TileUsed(TILE_SURVIVAL_DEATHMATCH)))
-	{
-		m_aMinigameDisabled[MINIGAME_SURVIVAL] = true;
-		return;
-	}
-
-	// set the mode to lobby, if the game is offline and there are now players
-	if (m_SurvivalGameState == SURVIVAL_OFFLINE)
-		m_SurvivalGameState = SURVIVAL_LOBBY;
-
-	// check if we dont have any players in the current state
-	if (!CountSurvivalPlayers(m_SurvivalGameState))
-	{
-		m_SurvivalGameState = SURVIVAL_OFFLINE;
-		m_SurvivalBackgroundState = SURVIVAL_OFFLINE;
-		return;
-	}
-
-	// decrease the tick at any time if it exists (its a timer)
-	if (m_SurvivalTick)
-		m_SurvivalTick--;
-
-	int Remaining = m_SurvivalTick / Server()->TickSpeed();
-
-	// main part
-	char aBuf[128];
-
-	if (m_SurvivalGameState > SURVIVAL_LOBBY && CountSurvivalPlayers(m_SurvivalGameState) == 1)
-	{
-		// if there is only one survival player left, before the time is over, we have a winner
-		m_SurvivalWinner = GetRandomSurvivalPlayer(m_SurvivalGameState);
-
-		if (m_apPlayers[m_SurvivalWinner])
-		{
-			SendSurvivalBroadcastFormat(true, true, Localizable("The winner is '%s'"), Server()->ClientName(m_SurvivalWinner));
-
-			// send message to winner
-			SendChatTarget(m_SurvivalWinner, m_apPlayers[m_SurvivalWinner]->Localize("You are the winner"));
-
-			// add a win to the winners' accounts
-			if (m_apPlayers[m_SurvivalWinner]->GetAccID() >= ACC_START)
-				m_Accounts[m_apPlayers[m_SurvivalWinner]->GetAccID()].m_SurvivalWins++;
-			m_apPlayers[m_SurvivalWinner]->GiveXP(250, "for winning a survival round");
-		}
-
-		// sending back to lobby
-		m_SurvivalGameState = SURVIVAL_LOBBY;
-		m_SurvivalBackgroundState = SURVIVAL_OFFLINE;
-		SetPlayerSurvivalState(SURVIVAL_LOBBY);
-	}
-
-
-	// checking for foreground states
-	switch (m_SurvivalGameState)
-	{
-		case SURVIVAL_LOBBY:
-		{
-			// check whether we have something running in the background
-			if (m_SurvivalBackgroundState != SURVIVAL_OFFLINE)
-				break;
-
-			// count the lobby players, if they are fewer than the minimum amount, set the waiting mode in the background
-			if (CountSurvivalPlayers(SURVIVAL_LOBBY) < Config()->m_SvSurvivalMinPlayers)
-			{
-				m_SurvivalBackgroundState = BACKGROUND_LOBBY_WAITING;
-			}
-			// if we are more than the minimum players waiting, the countdown will start in the background (30 seconds until the game starts)
-			else
-			{
-				m_SurvivalBackgroundState = BACKGROUND_LOBBY_COUNTDOWN;
-				m_SurvivalTick = Server()->TickSpeed() * (Config()->m_SvSurvivalLobbyCountdown + 1);
-			}
-			break;
-		}
-
-		case SURVIVAL_PLAYING:
-		{
-			// the game is running
-			break;
-		}
-
-		case SURVIVAL_DEATHMATCH:
-		{
-			if (!m_SurvivalTick)
-			{
-				// if the deathmatch is over, reset the survival game, sending players back to lobby
-				if (CountSurvivalPlayers(SURVIVAL_DEATHMATCH) > 1)
-					SendSurvivalBroadcast("There is no winner this round!");
-				m_SurvivalGameState = SURVIVAL_OFFLINE;
-				m_SurvivalBackgroundState = BACKGROUND_IDLE;
-				SetPlayerSurvivalState(SURVIVAL_LOBBY);
-			}
-			else
-			{
-				// before its over, send some broadcasts until its finally over
-				if (Server()->Tick() % 50 == 0)
-				{
-					if (Remaining % 30 == 0 || Remaining <= 10)
-					{
-						str_format(aBuf, sizeof(aBuf), "Deathmatch will end in %d seconds", Remaining);
-						SendSurvivalBroadcast(aBuf, true);
-					}
-				}
-			}
-			break;
-		}
-	}
-
-	// checking for background states
-	switch (m_SurvivalBackgroundState)
-	{
-		case BACKGROUND_LOBBY_WAITING:
-		{
-			// send the waiting for players broadcast to all survival players
-			if (Server()->Tick() % 50 == 0)
-			{
-				str_format(aBuf, sizeof(aBuf), "[%d/%d] players to start a round", CountSurvivalPlayers(SURVIVAL_LOBBY), Config()->m_SvSurvivalMinPlayers);
-				SendSurvivalBroadcast(aBuf, false, false);
-			}
-			break;
-		}
-
-		case BACKGROUND_LOBBY_COUNTDOWN:
-		{
-			if (!m_SurvivalTick)
-			{
-				// timer is over, the round starts
-				str_format(aBuf, sizeof(aBuf), "Round started, you have %d minutes to kill each other", Config()->m_SvSurvivalRoundTime);
-				SendSurvivalBroadcast(aBuf);
-
-				// set a new tick, this time for the round to end after its up
-				m_SurvivalTick = Server()->TickSpeed() * 60 * Config()->m_SvSurvivalRoundTime;
-				// set the foreground state
-				m_SurvivalGameState = SURVIVAL_PLAYING;
-				// change background state
-				m_SurvivalBackgroundState = BACKGROUND_DEATHMATCH_COUNTDOWN;
-				// set the player's survival state
-				SetPlayerSurvivalState(SURVIVAL_PLAYING);
-			}
-			else if (CountSurvivalPlayers(SURVIVAL_LOBBY) >= Config()->m_SvSurvivalMinPlayers)
-			{
-				// if we are more than the minimum players, the countdown will start
-				if (Server()->Tick() % 50 == 0)
-				{
-					str_format(aBuf, sizeof(aBuf), "Round will start in %d seconds", Remaining);
-					SendSurvivalBroadcast(aBuf, Remaining <= 10, false);
-				}
-			}
-			// if someone left the lobby, the countdown stops and we return to the lobby state (waiting for players again)
-			else
-			{
-				SendSurvivalBroadcast("Start failed, too few players");
-				m_SurvivalGameState = SURVIVAL_LOBBY;
-				m_SurvivalBackgroundState = SURVIVAL_OFFLINE;
-			}
-			break;
-		}
-
-		case BACKGROUND_DEATHMATCH_COUNTDOWN:
-		{
-			if (!m_SurvivalTick)
-			{
-				// deathmatch countdown is over, we will start the deathmatch now
-				SendSurvivalBroadcast("Deathmatch started, you have 2 minutes to kill the last survivors");
-
-				//sending to deathmatch arena
-				m_SurvivalGameState = SURVIVAL_DEATHMATCH;
-				SetPlayerSurvivalState(SURVIVAL_DEATHMATCH);
-				m_SurvivalBackgroundState = BACKGROUND_IDLE;
-
-				// deathmatch will be 2 minutes
-				m_SurvivalTick = Server()->TickSpeed() * 60 * Config()->m_SvSurvivalDeathmatchTime;
-			}
-			else
-			{
-				// printing broadcast until deathmatch starts
-				if (Server()->Tick() % 50 == 0)
-				{
-					if (Remaining % 60 == 0 || Remaining == 30 || Remaining <= 10)
-					{
-						str_format(aBuf, sizeof(aBuf), "Deathmatch will start in %d %s%s", Remaining > 30 ? Remaining / 60 : Remaining, (Remaining % 60 == 0 && Remaining != 0) ? "minute" : "second", (Remaining == 1 || Remaining == 60) ? "" : "s");
-						SendSurvivalBroadcast(aBuf, true);
-					}
-				}
-			}
-			break;
-		}
-	}
-}
-
-int CGameContext::CountSurvivalPlayers(int State)
-{
-	int count = 0;
-	for (int i = 0; i < MAX_CLIENTS; i++)
-		if (m_apPlayers[i] && m_apPlayers[i]->m_Minigame == MINIGAME_SURVIVAL && (m_apPlayers[i]->m_SurvivalState == State || State == -1))
-			count++;
-	return count;
-}
-
-void CGameContext::SetPlayerSurvivalState(int State)
-{
-	for (int i = 0; i < MAX_CLIENTS; i++)
-		if (m_apPlayers[i] && m_apPlayers[i]->m_Minigame == MINIGAME_SURVIVAL)
-		{
-			// only send playing people to deathmatch
-			if (State == SURVIVAL_DEATHMATCH && m_apPlayers[i]->m_SurvivalState != SURVIVAL_PLAYING)
-				continue;
-
-			// unset spectator mode and pause
-			m_apPlayers[i]->SetPlaying();
-			// kill the character
-			m_apPlayers[i]->KillCharacter(WEAPON_GAME);
-			// set its new survival state
-			m_apPlayers[i]->m_SurvivalState = State;
-			// hide name in every state except lobby
-			m_apPlayers[i]->m_ShowName = State == SURVIVAL_LOBBY;
-		}
-}
-
-int CGameContext::GetRandomSurvivalPlayer(int State, int NotThis)
-{
-	std::vector<int> SurvivalPlayers;
-	for (int i = 0; i < MAX_CLIENTS; i++)
-		if (i != NotThis && m_apPlayers[i] && m_apPlayers[i]->m_Minigame == MINIGAME_SURVIVAL && (m_apPlayers[i]->m_SurvivalState == State || State == -1))
-			SurvivalPlayers.push_back(i);
-	if (SurvivalPlayers.size())
-	{
-		int Rand = rand() % SurvivalPlayers.size();
-		return SurvivalPlayers[Rand];
-	}
-	return -1;
-}
-
-void CGameContext::SendSurvivalBroadcast(const char *pMsg, bool Sound, bool IsImportant, CFormatArg *pArgs, int NumArgs)
-{
-	for (int i = 0; i < MAX_CLIENTS; i++)
-	{
-		if (m_apPlayers[i] && m_apPlayers[i]->m_Minigame == MINIGAME_SURVIVAL)
-		{
-			if (Sound)
-				CreateSoundPlayer(SOUND_HOOK_NOATTACH, i);
-
-			// show money broadcast instead of the wanted one if we are on a money tile
-			if (m_apPlayers[i]->GetCharacter() && m_apPlayers[i]->GetCharacter()->m_MoneyTile)
-				continue;
-			SendBroadcast(pMsg, i, IsImportant, pArgs, NumArgs);
-		}
-	}
 }
 
 void CGameContext::InstagibTick(int Type)

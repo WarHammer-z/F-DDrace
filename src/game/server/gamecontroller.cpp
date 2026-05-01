@@ -5,19 +5,19 @@
 #include <game/mapitems.h>
 
 #include "entities/character.h"
-#include "entities/pickup.h"
-#include "entities/playercounter.h"
+#include "entities/map/pickup.h"
+#include "entities/map/playercounter.h"
 #include "gamecontext.h"
 #include "gamecontroller.h"
 #include "player.h"
 
-#include "entities/light.h"
-#include "entities/dragger.h"
-#include "entities/gun.h"
-#include "entities/projectile.h"
-#include "entities/plasma.h"
-#include "entities/door.h"
-#include "entities/clock.h"
+#include "entities/weapons/projectile.h"
+#include "entities/map/light.h"
+#include "entities/map/dragger.h"
+#include "entities/map/gun.h"
+#include "entities/map/plasma.h"
+#include "entities/map/door.h"
+#include "entities/map/clock.h"
 #include <game/layers.h>
 
 
@@ -153,7 +153,7 @@ void IGameController::OnCharacterSpawn(CCharacter *pChr)
 	}
 	case MINIGAME_1VS1:
 	{
-		if (GameServer()->Arenas()->OnCharacterSpawn(pChr->GetPlayer()->GetCID()))
+		if (GameServer()->Arenas()->OnCharacterSpawn(pChr))
 			break;
 		goto default_case;
 	}
@@ -237,8 +237,7 @@ bool IGameController::OnEntity(int Index, vec2 Pos, int Layer, int Flags, int Nu
 	else if (Layer == LAYER_SWITCH && Index == TILE_SWITCH_PLOT_TOTELE && Number > 0)
 	{
 		int PlotID = GameServer()->Collision()->GetPlotBySwitch(Number);
-		GameServer()->m_aPlots[PlotID].m_ToTele = Pos;
-		GameServer()->m_aPlots[PlotID].m_Size = GameServer()->Collision()->m_apPlotSize[PlotID];
+		GameServer()->m_Plots.InitPlot(PlotID, Pos, GameServer()->Collision()->m_apPlotSize[PlotID]);
 	}
 	else if (Layer == LAYER_SWITCH && Index == TILE_SWITCH_REDIRECT_SERVER_TO && Number > 0)
 	{
@@ -252,12 +251,17 @@ bool IGameController::OnEntity(int Index, vec2 Pos, int Layer, int Flags, int Nu
 		}
 		else
 		{
-			int Port = GameServer()->GetRediretListPort(Number);
+			int Port = GameServer()->GetRedirectListPort(Number);
 			if (Port > 0)
 			{
 				new CPlayerCounter(&GameServer()->m_World, Pos, Port);
 			}
 		}
+	}
+	else if (Layer == LAYER_SWITCH && Index == TILE_SWITCH_HELICOPTER_SPAWN)
+	{
+		int Delay = GameServer()->Collision()->GetSwitchDelay(GameServer()->Collision()->GetMapIndex(Pos));
+		GameServer()->SpawnHelicopter(-1, 0, Pos, GameServer()->GetHelicopterTileType(), Delay, 1.f, true, Number);
 	}
 	else if (Layer == LAYER_SWITCH && Index == TILE_DURAK_TABLE)
 	{
@@ -290,12 +294,13 @@ bool IGameController::OnEntity(int Index, vec2 Pos, int Layer, int Flags, int Nu
 			WEAPON_SHOTGUN, //Type
 			-1, //Owner
 			Pos, //Pos
-			vec2(sin(Deg), cos(Deg)), //Dir
+			vec2(std::sin(Deg), std::cos(Deg)), //Dir
 			-2, //Span
 			true, //Freeze
 			true, //Explosive
 			0, //Force
 			(Config()->m_SvShotgunBulletSound)?SOUND_GRENADE_EXPLODE:-1,//SoundImpact
+			vec2(std::sin(Deg), std::cos(Deg)),
 			Layer,
 			Number
 			);
@@ -319,18 +324,19 @@ bool IGameController::OnEntity(int Index, vec2 Pos, int Layer, int Flags, int Nu
 			WEAPON_SHOTGUN, //Type
 			-1, //Owner
 			Pos, //Pos
-			vec2(sin(Deg), cos(Deg)), //Dir
+			vec2(std::sin(Deg), std::cos(Deg)), //Dir
 			-2, //Span
 			true, //Freeze
 			false, //Explosive
 			0,
 			SOUND_GRENADE_EXPLODE,
+			vec2(std::sin(Deg), std::cos(Deg)),
 			Layer,
 			Number
 			);
 		pBullet->SetBouncing(2 - (Dir % 2));
 	}
-
+	
 	if(Index == ENTITY_ARMOR_1)
 		Type = POWERUP_ARMOR;
 	else if(Index == ENTITY_HEALTH_1)
@@ -519,7 +525,25 @@ bool IGameController::OnEntity(int Index, vec2 Pos, int Layer, int Flags, int Nu
 
 	if(Type != -1)
 	{
-		new CPickup(&GameServer()->m_World, Pos, Type, SubType, Layer, Number);
+		int Special = 0;
+		int Delay = GameServer()->Collision()->GetSwitchDelay(GameServer()->Collision()->GetMapIndex(Pos));
+		if (Layer == LAYER_SWITCH && Number == 0 && Delay > 0)
+		{
+			if (SubType == WEAPON_HAMMER)
+			{
+				if (Delay & 1)
+					Special |= SPECIAL_DOORHAMMER;
+				if (Delay & 2)
+					Special |= SPECIAL_PPROJECTILEHAMMER;
+			}
+			else if (SubType == WEAPON_NINJA)
+				Special |= SPECIAL_SCROLLNINJA;
+			else if (GameServer()->IsValidSpreadWeapon(SubType))
+				Special |= SPECIAL_SPREADWEAPON;
+		}
+
+		int PickupFlags = TileFlagsToPickupFlags(Flags);
+		new CPickup(&GameServer()->m_World, Pos, Type, SubType, Layer, Number, -1, true, PickupFlags, Special);
 		return true;
 	}
 
@@ -556,18 +580,16 @@ void IGameController::Snap(int SnappingClient)
 	CCharacter *pSpectator = !pSnap ? 0 : (pSnap->GetTeam() == TEAM_SPECTATORS || pSnap->IsPaused()) ? GameServer()->GetPlayerChar(pSnap->GetSpectatorID()) : pSnap->m_pControlledTee ? pSnap->m_pControlledTee->GetCharacter() : 0;
 	int GameStartTick = m_GameStartTick;
 	bool IsBirthdayPresent = false;
+	CCharacter *pChrOrSpec = pSpectator ? pSpectator : pSnappingChar;
+	if (pChrOrSpec)
 	{
-		CCharacter *pChr = pSpectator ? pSpectator : pSnappingChar;
-		if (pChr)
+		if (pChrOrSpec->m_BirthdayGiftEndTick > Server()->Tick())
 		{
-			if (pChr->m_BirthdayGiftEndTick > Server()->Tick())
-			{
-				GameStartTick = pChr->m_BirthdayGiftEndTick - Server()->TickSpeed() * 60;
-				IsBirthdayPresent = true;
-			}
-			else if (pChr->m_DDRaceState == DDRACE_STARTED)
-				GameStartTick = pChr->m_StartTime;
+			GameStartTick = pChrOrSpec->m_BirthdayGiftEndTick - Server()->TickSpeed() * 60;
+			IsBirthdayPresent = true;
 		}
+		else if (pChrOrSpec->m_DDRaceState == DDRACE_STARTED)
+			GameStartTick = pChrOrSpec->m_StartTime;
 	}
 
 	int GameStateFlags = 0;
@@ -607,7 +629,7 @@ void IGameController::Snap(int SnappingClient)
 		if (GameServer()->Arenas()->FightStarted(ScoreLimitID))
 			ScoreLimit = GameServer()->Arenas()->GetScoreLimit(ScoreLimitID);
 		else if (pSnap->m_ScoreMode == SCORE_BONUS)
-			ScoreLimit = Config()->m_SvNoBonusScoreTreshold;
+			ScoreLimit = Config()->m_SvNoBonusScoreThreshold;
 
 		((int*)pGameData)[0] = m_GameFlags;
 		((int*)pGameData)[1] = TranslatedGameStateFlags;
@@ -673,7 +695,7 @@ void IGameController::Snap(int SnappingClient)
 			mem_zero(pSwitchState->m_aEndTicks, sizeof(pSwitchState->m_aEndTicks));
 
 			std::sort(vEndTicks.begin(), vEndTicks.end());
-			const int NumTimedSwitchers = min((int)vEndTicks.size(), (int)std::size(pSwitchState->m_aEndTicks));
+			const int NumTimedSwitchers = minimum((int)vEndTicks.size(), (int)std::size(pSwitchState->m_aEndTicks));
 
 			for(int i = 0; i < NumTimedSwitchers; i++)
 			{
@@ -706,7 +728,8 @@ void IGameController::Snap(int SnappingClient)
 		| GAMEINFOFLAG_DONT_MASK_ENTITIES;
 	pGameInfoEx->m_Flags2 = 0
 		| GAMEINFOFLAG2_GAMETYPE_FDDRACE
-		| GAMEINFOFLAG2_ENTITIES_FDDRACE;
+		| GAMEINFOFLAG2_ENTITIES_FDDRACE
+		| GAMEINFOFLAG2_PREDICT_EVENTS;
 
 	if (Config()->m_SvAllowXSkins)
 		pGameInfoEx->m_Flags2 |= GAMEINFOFLAG2_ALLOW_X_SKINS;
@@ -720,14 +743,20 @@ void IGameController::Snap(int SnappingClient)
 	if (!pSnap->IsMinigame() && pSnap->m_ScoreMode == SCORE_TIME)
 		pGameInfoEx->m_Flags |= GAMEINFOFLAG_TIMESCORE;
 
-	if (pSnap->ShowDDraceHud())
+	bool DDraceHud = pSnap->ShowDDraceHud();
+	if (DDraceHud)
 		pGameInfoEx->m_Flags2 |= GAMEINFOFLAG2_HUD_DDRACE;
-	else // fng, survival
+	if (!DDraceHud || (pChrOrSpec && pChrOrSpec->GetPlayer()->m_Gamemode == GAMEMODE_VANILLA)) // fng, survival
 		pGameInfoEx->m_Flags2 |= GAMEINFOFLAG2_HUD_HEALTH_ARMOR;
 
 	// allow inputs for arena placing while in spec, or for click to spectate in spectators
 	if (GameServer()->Arenas()->IsConfiguring(SnappingClient) || pSnap->GetTeam() == TEAM_SPECTATORS)
 		pGameInfoEx->m_Flags &= ~GAMEINFOFLAG_BUG_DDRACE_INPUT;
+
+	// disable events prediction in durak, as characters are used for labels.
+	// those characters can be intersected on the client side to predict events when shooting at the wall
+	if (pSnap->SilentFarmActive() || GameServer()->Durak()->ActivelyPlaying(SnappingClient))
+		pGameInfoEx->m_Flags2 &= ~GAMEINFOFLAG2_PREDICT_EVENTS;
 
 	if (!pSnappingChar)
 		return;
@@ -745,6 +774,9 @@ void IGameController::Snap(int SnappingClient)
 
 	if (pSnappingChar->ShowAmmoHud())
 		pGameInfoEx->m_Flags2 |= GAMEINFOFLAG2_HUD_AMMO;
+
+	if (pSnappingChar->IsPreventEventPredict())
+		pGameInfoEx->m_Flags2 &= ~GAMEINFOFLAG2_PREDICT_EVENTS;
 }
 
 void IGameController::Tick()
@@ -829,7 +861,7 @@ void IGameController::UpdateGameInfo(int ClientID)
 			if (GameServer()->Arenas()->FightStarted(i))
 				GameInfoMsg.m_ScoreLimit = GameServer()->Arenas()->GetScoreLimit(i);
 			else if (pPlayer->m_ScoreMode == SCORE_BONUS)
-				GameInfoMsg.m_ScoreLimit = Config()->m_SvNoBonusScoreTreshold;
+				GameInfoMsg.m_ScoreLimit = Config()->m_SvNoBonusScoreThreshold;
 
 			if (pPlayer->GetCharacter() && pPlayer->GetCharacter()->m_BirthdayGiftEndTick > Server()->Tick())
 				GameInfoMsg.m_TimeLimit = 1;
@@ -848,7 +880,7 @@ void IGameController::UpdateGameInfo(int ClientID)
 		if (GameServer()->Arenas()->FightStarted(ClientID))
 			GameInfoMsg.m_ScoreLimit = GameServer()->Arenas()->GetScoreLimit(ClientID);
 		else if (pPlayer->m_ScoreMode == SCORE_BONUS)
-			GameInfoMsg.m_ScoreLimit = Config()->m_SvNoBonusScoreTreshold;
+			GameInfoMsg.m_ScoreLimit = Config()->m_SvNoBonusScoreThreshold;
 
 		if (pPlayer->GetCharacter() && pPlayer->GetCharacter()->m_BirthdayGiftEndTick > Server()->Tick())
 			GameInfoMsg.m_TimeLimit = 1;
@@ -917,6 +949,17 @@ int IGameController::GetStartTeam(int NotThisID)
 	return TEAM_SPECTATORS;
 }
 
+int IGameController::TileFlagsToPickupFlags(int TileFlags) const
+{
+	int PickupFlags = 0;
+	if(TileFlags & TILEFLAG_VFLIP)
+		PickupFlags |= PICKUPFLAG_XFLIP;
+	if(TileFlags & TILEFLAG_HFLIP)
+		PickupFlags |= PICKUPFLAG_YFLIP;
+	if(TileFlags & TILEFLAG_ROTATE)
+		PickupFlags |= PICKUPFLAG_ROTATE;
+	return PickupFlags;
+}
 
 void IGameController::RegisterChatCommands(CCommandManager *pManager)
 {

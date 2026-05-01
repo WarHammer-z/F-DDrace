@@ -6,14 +6,14 @@
 #include <game/server/teams.h>
 #include <engine/shared/config.h>
 #include <game/server/gamemodes/DDRace.h>
-#include <game/server/entities/flyingpoint.h>
+#include <game/server/entities/effects/flyingpoint.h>
 
 const vec2 CCard::ms_CardSizeRadius = vec2(14.f, 16.f);
 const vec2 CCard::ms_TableSizeRadius = vec2(4.9f * 32.f, 3.8f * 32.f); // 11*9 blocks around table center tile (all 4 corner tiles can be cut-out)
 const vec2 CCard::ms_AttackAreaRadius = vec2(4.f * 32.f, 1.5f * 32.f); // 8x3
 const vec2 CCard::ms_AttackAreaCenterOffset = vec2(-32.f, 16.f);
 
-CDurak::CDurak(CGameContext *pGameServer, int Type) : CMinigame(pGameServer, Type)
+CDurak::CDurak(CGameContext *pGameServer) : CMinigame(pGameServer, MINIGAME_DURAK)
 {
 	m_vLastDuraks.clear();
 	for (int i = 0; i < MAX_CLIENTS; i++)
@@ -23,6 +23,7 @@ CDurak::CDurak(CGameContext *pGameServer, int Type) : CMinigame(pGameServer, Typ
 		m_aInDurakGame[i] = false;
 		m_aDurakNumReserved[i] = 0;
 		m_aSnappedSeatIndex[i] = -1;
+		m_aUpdateTeamsState[i] = false;
 	}
 	for (int i = 0; i < 5; i++)
 	{
@@ -121,11 +122,11 @@ void CDurak::CreateFlyingPoint(int FromClientID, int Game, CCard *pToCard)
 	new CFlyingPoint(&GameServer()->m_World, From, -1, FromClientID, normalize(To - From) * 15.f, To);
 }
 
-void CDurak::OnCharacterSpawn(CCharacter *pChr)
+bool CDurak::OnCharacterSpawn(CCharacter *pChr)
 {
 	int ClientID = pChr->GetPlayer()->GetCID();
 	if (!InDurakGame(ClientID))
-		return;
+		return false;
 
 	int Game = GetGameByClient(ClientID);
 	CDurakGame *pGame = m_vpGames[Game];
@@ -144,6 +145,7 @@ void CDurak::OnCharacterSpawn(CCharacter *pChr)
 	CLockedTune TuneHookLength("hook_length", 540.f);
 	GameServer()->SetLockedTune(&pChr->m_LockedTunings, TuneHookLength);
 	pChr->ApplyLockedTunings();
+	return true;
 }
 
 void CDurak::OnCharacterSeat(int ClientID, int Number, int SeatIndex)
@@ -420,12 +422,15 @@ bool CDurak::OnRainbowName(int ClientID, int MapID)
 	return m_aSnappedSeatIndex[ClientID] == -1 && !::NetworkClipped(GameServer(), ClientID, m_vpGames[0]->m_TablePos);
 }
 
-void CDurak::OnInput(CCharacter *pChr, CNetObj_PlayerInput *pNewInput)
+bool CDurak::OnInput(CCharacter *pChr, CNetObj_PlayerInput *pNewInput)
 {
 	int ClientID = pChr->GetPlayer()->GetCID();
+	if (!ActivelyPlaying(ClientID))
+		return false;
+
 	int Game = GetGameByClient(ClientID);
 	if (Game < 0)
-		return;
+		return false;
 
 	CDurakGame *pGame = m_vpGames[Game];
 	CDurakGame::SSeat *pSeat = pGame->GetSeatByClient(ClientID);
@@ -470,7 +475,7 @@ void CDurak::OnInput(CCharacter *pChr, CNetObj_PlayerInput *pNewInput)
 		else if (pSeat->m_Player.m_Tooltip == CCard::TOOLTIP_SELECT_ATTACK)
 		{
 			std::vector<int> vOpenAttackIndices = pGame->GetOpenAttacks();
-			int NumOpenAttacks = vOpenAttackIndices.size();;
+			int NumOpenAttacks = vOpenAttackIndices.size();
 			if (NumOpenAttacks > 0)
 			{
 				int CurIndex = -1;
@@ -608,7 +613,7 @@ void CDurak::OnInput(CCharacter *pChr, CNetObj_PlayerInput *pNewInput)
 			}
 		}
 	}
-	else if (abs(pNewInput->m_TargetX - pSeat->m_Player.m_LastInput.m_TargetX) > 3.f || abs(pNewInput->m_TargetY - pSeat->m_Player.m_LastInput.m_TargetY) > 3.f)
+	else if (absolute(pNewInput->m_TargetX - pSeat->m_Player.m_LastInput.m_TargetX) > 3.f || absolute(pNewInput->m_TargetY - pSeat->m_Player.m_LastInput.m_TargetY) > 3.f)
 	{
 		if (pSeat->m_Player.m_KeyboardControl)
 		{
@@ -635,6 +640,7 @@ void CDurak::OnInput(CCharacter *pChr, CNetObj_PlayerInput *pNewInput)
 	{
 		m_aCardUpdate[ClientID][&m_aStaticCards[DURAK_TEXT_KEYBOARD_CONTROL]] = true;
 	}
+	return true;
 }
 
 template<typename... Args>
@@ -686,6 +692,12 @@ void CDurak::SendChatToParticipants(int Game, const char *pFormat, Args&&... arg
 			GameServer()->SendChatTarget(ClientID, aBuf);
 		}
 	}
+}
+
+int CDurak::SpawnIndex(int ClientID) const
+{
+	// overriden by m_ForceSpawnPos while in an active game
+	return TILE_DURAK_LOBBY;
 }
 
 bool CDurak::StartGame(int Game)
@@ -767,12 +779,13 @@ bool CDurak::StartGame(int Game)
 			}
 		}
 	}
+	pTeams->SetTeamLock(FirstFreeTeam, true);
 
 	// Attack previous durak in new round
 	if (LastDurakIndex != -1)
 	{
 		// Get previous player of LastDurakIndex, so that LastDurakIndex ends up getting attacked.
-		pGame->m_InitialAttackerIndex = pGame->GetNextPlayer(LastDurakIndex, false, true);
+		pGame->m_InitialAttackerIndex = pGame->GetNextPlayer(LastDurakIndex, true);
 		m_vLastDuraks.erase(DurakIt);
 	}
 	pGame->DealHandCards();
@@ -808,7 +821,7 @@ bool CDurak::HandleMoneyTransaction(int ClientID, int Amount, const char *pMsg)
 		int AccID = pPlayer->GetAccID();
 		if (AccID >= ACC_START)
 		{
-			CGameContext::AccountInfo *pAccount = &GameServer()->m_Accounts[AccID];
+			CAccounts::AccountInfo *pAccount = &GameServer()->m_Accounts.Get(AccID);
 			pAccount->m_DurakProfit += Amount;
 		}
 		return true;
@@ -1081,13 +1094,13 @@ void CDurak::UpdateGame(int Game)
 
 		// Dynamically sort hand cards
 		float Gap = 4.f;
-		const float RequiredSpace = min(NumCards * (CCard::ms_CardSizeRadius.x*2 + Gap) - Gap, (CCard::ms_TableSizeRadius.x - 32.f) * 2);
+		const float RequiredSpace = minimum(NumCards * (CCard::ms_CardSizeRadius.x*2 + Gap) - Gap, (CCard::ms_TableSizeRadius.x - 32.f) * 2);
 		float PosX = -RequiredSpace / 2.f;
 		if (NumCards > 1)
 		{
 			Gap = RequiredSpace / (NumCards - 1);
 		}
-		float PushStrength = 0.5f + min((int)NumCards - 16, 10) * 0.1f;
+		float PushStrength = 0.5f + minimum((int)NumCards - 16, 10) * 0.1f;
 		for (unsigned int c = 0; c < NumCards; c++)
 		{
 			CCard *pCard = &pSeat->m_Player.m_vHandCards[c];
@@ -1095,12 +1108,12 @@ void CDurak::UpdateGame(int Game)
 			if (pSeat->m_Player.m_HoveredCard != -1 && NumCards > 10)
 			{
 				int Diff = c - pSeat->m_Player.m_HoveredCard;
-				if (Diff != 0 && abs(Diff) <= 3)
+				if (Diff != 0 && absolute(Diff) <= 3)
 				{
-					float Falloff = 1.f / abs(Diff);
+					float Falloff = 1.f / absolute(Diff);
 					if (NumCards < 15)
 						Falloff *= 0.5f;
-					float Multiplier = (float)(Diff) / abs(Diff); // -1 or +1
+					float Multiplier = (float)(Diff) / absolute(Diff); // -1 or +1
 					Offset = (Gap * PushStrength * Falloff) * Multiplier;
 
 					bool IsLeftMost = (c == 0);
@@ -1674,7 +1687,7 @@ void CDurak::ProcessPlayerWin(int Game, CDurakGame::SSeat *pSeat, int WinPos)
 	// Update acc stats
 	if (WinPos >= 0 && pPlayer->GetAccID() >= ACC_START)
 	{
-		GameServer()->m_Accounts[pPlayer->GetAccID()].m_DurakWins++;
+		GameServer()->m_Accounts.Get(pPlayer->GetAccID()).m_DurakWins++;
 	}
 
 	EndMove(Game, pSeat, true);

@@ -111,14 +111,31 @@ function(add_c_compiler_flag_if_supported VARIABLE FLAG)
   endif()
 endfunction()
 
+function(add_cxx_compiler_flag_if_supported VARIABLE FLAG)
+  if(ARGC GREATER 2)
+    set(CHECKED_FLAG "${ARGV2}")
+  else()
+    set(CHECKED_FLAG "${FLAG}")
+  endif()
+  string(REGEX REPLACE "[^A-Za-z0-9]" "_" CONFIG_VARIABLE "FLAG_SUPPORTED${CHECKED_FLAG}")
+  check_cxx_compiler_flag("${CHECKED_FLAG}" ${CONFIG_VARIABLE})
+  if(${CONFIG_VARIABLE})
+    if(${VARIABLE})
+      set("${VARIABLE}" "${${VARIABLE}};${FLAG}" PARENT_SCOPE)
+    else()
+      set("${VARIABLE}" "${FLAG}" PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+
 if(NOT MSVC)
   if(CMAKE_VERSION VERSION_LESS 3.1 OR TARGET_OS STREQUAL "mac")
-    check_cxx_compiler_flag(-std=gnu++17 FLAG_SUPPORTED_std_gnu__17)
-    if(FLAG_SUPPORTED_std_gnu__17)
+    check_cxx_compiler_flag(-std=gnu++20 FLAG_SUPPORTED_std_gnu__20)
+    if(FLAG_SUPPORTED_std_gnu__20)
       if(CMAKE_CXX_FLAGS)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++20")
       else()
-        set(CMAKE_CXX_FLAGS -std=gnu++17)
+        set(CMAKE_CXX_FLAGS -std=gnu++20)
       endif()
     endif()
   endif()
@@ -165,6 +182,7 @@ if(NOT MSVC)
   add_c_compiler_flag_if_supported(OUR_FLAGS_OWN -Wno-missing-field-initializers)
   add_c_compiler_flag_if_supported(OUR_FLAGS_OWN -Wformat=2) # Warn about format strings.
   add_c_compiler_flag_if_supported(OUR_FLAGS_DEP -Wno-implicit-function-declaration)
+  add_cxx_compiler_flag_if_supported(OUR_FLAGS_OWN -Wno-deprecated-enum-float-conversion) # c++20 arithmetic between floating-point type and enumeration type
 endif()
 
 if(NOT MSVC)
@@ -976,6 +994,8 @@ set(EXPECTED_DATA
   mapres/winter_mountains.png
   mapres/winter_mountains2.png
   mapres/winter_mountains3.png
+  maps-fddrace/LobbyChill.map
+  maps-fddrace/blWorld.map
   maps/BlmapChill.map
   maps/BlmapChill_versions/BlmapChill_v0004.map
   maps/BlmapChill_versions/BlmapChill_v0052.map
@@ -1228,6 +1248,12 @@ set(COPY_FILES
 file(COPY ${COPY_FILES} DESTINATION .)
 
 ########################################################################
+# MERGE datasrc/maps-fddrace INTO data/maps
+########################################################################
+
+file(COPY ${PROJECT_SOURCE_DIR}/datasrc/maps-fddrace/ DESTINATION ${PROJECT_BINARY_DIR}/data/maps)
+
+########################################################################
 # CODE GENERATION
 ########################################################################
 
@@ -1309,26 +1335,20 @@ set_src(BASE GLOB_RECURSE src/base
 )
 set_src(ENGINE_INTERFACE GLOB src/engine
   antibot.h
-  client.h
   config.h
   console.h
-  contacts.h
   demo.h
-  editor.h
   engine.h
   graphics.h
   http.h
-  input.h
   kernel.h
   keys.h
   map.h
   masterserver.h
   message.h
   server.h
-  serverbrowser.h
   sound.h
   storage.h
-  textrender.h
   uuid.h
 )
 set_src(ENGINE_SHARED GLOB src/engine/shared
@@ -1478,29 +1498,13 @@ set_src(GAME_SERVER GLOB_RECURSE src/game/server
   ddracechat.cpp
   ddracechat.h
   ddracecommands.cpp
-  draweditor.cpp
-  draweditor.h
-  entities/advanced_entity.cpp
-  entities/advanced_entity.h
-  entities/atom.cpp
-  entities/atom.h
-  entities/button.cpp
-  entities/button.h
   entities/character.cpp
   entities/character.h
-  entities/clock.cpp
-  entities/clock.h
-  entities/custom_projectile.cpp
-  entities/custom_projectile.h
-  entities/door.cpp
-  entities/door.h
-  entities/dragger.cpp
-  entities/dragger.h
-  entities/dummy.cpp
   entities/dummy/blmapchill_police.cpp
   entities/dummy/blmapchill_police.h
   entities/dummy/chillblock5_police.cpp
   entities/dummy/chillblock5_police.h
+  entities/dummy/dummy_legacy.cpp
   entities/dummy/dummybase.cpp
   entities/dummy/dummybase.h
   entities/dummy/house.cpp
@@ -1508,68 +1512,98 @@ set_src(GAME_SERVER GLOB_RECURSE src/game/server
   entities/dummy/macros.h
   entities/dummy/v3_blocker.cpp
   entities/dummy/v3_blocker.h
-  entities/epic_circle.cpp
-  entities/epic_circle.h
-  entities/flag.cpp
-  entities/flag.h
-  entities/flyingpoint.cpp
-  entities/flyingpoint.h
-  entities/grog.cpp
-  entities/grog.h
-  entities/gun.cpp
-  entities/gun.h
-  entities/helicopter/bone.cpp
-  entities/helicopter/bone.h
-  entities/helicopter/helicopter.cpp
-  entities/helicopter/helicopter.h
-  entities/helicopter/helicopter_turret.cpp
-  entities/helicopter/helicopter_turret.h
-  entities/helicopter/missile.cpp
-  entities/helicopter/missile.h
-  entities/laser.cpp
-  entities/laser.h
-  entities/lasertext.cpp
-  entities/lasertext.h
-  entities/light.cpp
-  entities/light.h
-  entities/lightninglaser.cpp
-  entities/lightninglaser.h
-  entities/lightsaber.cpp
-  entities/lightsaber.h
-  entities/lovely.cpp
-  entities/lovely.h
-  entities/meteor.cpp
-  entities/meteor.h
-  entities/money.cpp
-  entities/money.h
-  entities/pickup.cpp
-  entities/pickup.h
-  entities/pickup_drop.cpp
-  entities/pickup_drop.h
-  entities/plasma.cpp
-  entities/plasma.h
-  entities/playercounter.cpp
-  entities/playercounter.h
-  entities/portal.cpp
-  entities/portal.h
-  entities/portalblocker.cpp
-  entities/portalblocker.h
-  entities/projectile.cpp
-  entities/projectile.h
-  entities/rotating_ball.cpp
-  entities/rotating_ball.h
-  entities/speedup.cpp
-  entities/speedup.h
-  entities/stable_projectile.cpp
-  entities/stable_projectile.h
-  entities/staff_ind.cpp
-  entities/staff_ind.h
-  entities/taser_shield.cpp
-  entities/taser_shield.h
-  entities/teleporter.cpp
-  entities/teleporter.h
-  entities/trail.cpp
-  entities/trail.h
+  entities/effects/atom.cpp
+  entities/effects/atom.h
+  entities/effects/epic_circle.cpp
+  entities/effects/epic_circle.h
+  entities/effects/flyingpoint.cpp
+  entities/effects/flyingpoint.h
+  entities/effects/lovely.cpp
+  entities/effects/lovely.h
+  entities/effects/meteor.cpp
+  entities/effects/meteor.h
+  entities/effects/rotating_ball.cpp
+  entities/effects/rotating_ball.h
+  entities/effects/staff_ind.cpp
+  entities/effects/staff_ind.h
+  entities/effects/taser_shield.cpp
+  entities/effects/taser_shield.h
+  entities/effects/trail.cpp
+  entities/effects/trail.h
+  entities/interactive/advanced_entity.cpp
+  entities/interactive/advanced_entity.h
+  entities/interactive/flag.cpp
+  entities/interactive/flag.h
+  entities/interactive/grog.cpp
+  entities/interactive/grog.h
+  entities/interactive/money.cpp
+  entities/interactive/money.h
+  entities/interactive/pickup_drop.cpp
+  entities/interactive/pickup_drop.h
+  entities/interactive/vehicle/base/healthbar.cpp
+  entities/interactive/vehicle/base/healthbar.h
+  entities/interactive/vehicle/base/vehicle.cpp
+  entities/interactive/vehicle/base/vehicle.h
+  entities/interactive/vehicle/helicopter.cpp
+  entities/interactive/vehicle/helicopter.h
+  entities/interactive/vehicle/helicopter_turret.cpp
+  entities/interactive/vehicle/helicopter_turret.h
+  entities/interactive/vehicle/spider.cpp
+  entities/interactive/vehicle/spider.h
+  entities/map/clock.cpp
+  entities/map/clock.h
+  entities/map/door.cpp
+  entities/map/door.h
+  entities/map/dragger.cpp
+  entities/map/dragger.h
+  entities/map/draweditor/button.cpp
+  entities/map/draweditor/button.h
+  entities/map/draweditor/drawtile.cpp
+  entities/map/draweditor/drawtile.h
+  entities/map/draweditor/speedup.cpp
+  entities/map/draweditor/speedup.h
+  entities/map/draweditor/teleporter.cpp
+  entities/map/draweditor/teleporter.h
+  entities/map/gun.cpp
+  entities/map/gun.h
+  entities/map/light.cpp
+  entities/map/light.h
+  entities/map/pickup.cpp
+  entities/map/pickup.h
+  entities/map/plasma.cpp
+  entities/map/plasma.h
+  entities/map/playercounter.cpp
+  entities/map/playercounter.h
+  entities/misc/bone/base/bone.cpp
+  entities/misc/bone/base/bone.h
+  entities/misc/bone/base/bone_model.cpp
+  entities/misc/bone/base/bone_model.h
+  entities/misc/bone/helicopter_models.cpp
+  entities/misc/bone/helicopter_models.h
+  entities/misc/bone/spider_model.cpp
+  entities/misc/bone/spider_model.h
+  entities/misc/bone/vehicle_model.cpp
+  entities/misc/bone/vehicle_model.h
+  entities/misc/lasertext.cpp
+  entities/misc/lasertext.h
+  entities/misc/stable_projectile.cpp
+  entities/misc/stable_projectile.h
+  entities/weapons/custom_projectile.cpp
+  entities/weapons/custom_projectile.h
+  entities/weapons/laser.cpp
+  entities/weapons/laser.h
+  entities/weapons/lightninglaser.cpp
+  entities/weapons/lightninglaser.h
+  entities/weapons/lightsaber.cpp
+  entities/weapons/lightsaber.h
+  entities/weapons/missile.cpp
+  entities/weapons/missile.h
+  entities/weapons/portal.cpp
+  entities/weapons/portal.h
+  entities/weapons/portalblocker.cpp
+  entities/weapons/portalblocker.h
+  entities/weapons/projectile.cpp
+  entities/weapons/projectile.h
   entity.cpp
   entity.h
   eventhandler.cpp
@@ -1591,17 +1625,31 @@ set_src(GAME_SERVER GLOB_RECURSE src/game/server
   houses/shop.h
   houses/tavern.cpp
   houses/tavern.h
-  mask128.h
   minigames/arenas.cpp
   minigames/arenas.h
   minigames/durak.cpp
   minigames/durak.h
   minigames/minigame.cpp
   minigames/minigame.h
+  minigames/survival.cpp
+  minigames/survival.h
+  misc/accounts.cpp
+  misc/accounts.h
+  misc/draweditor.cpp
+  misc/draweditor.h
+  misc/mask128.h
+  misc/plots.cpp
+  misc/plots.h
+  misc/rainbowname.cpp
+  misc/rainbowname.h
+  misc/snake.cpp
+  misc/snake.h
+  misc/votingmenu.cpp
+  misc/votingmenu.h
+  misc/whois.cpp
+  misc/whois.h
   player.cpp
   player.h
-  rainbowname.cpp
-  rainbowname.h
   save.cpp
   save.h
   score.h
@@ -1609,18 +1657,12 @@ set_src(GAME_SERVER GLOB_RECURSE src/game/server
   score/file_score.h
   score/sql_score.cpp
   score/sql_score.h
-  snake.cpp
-  snake.h
   teams.cpp
   teams.h
   teehistorian.cpp
   teehistorian.h
   teeinfo.cpp
   teeinfo.h
-  votingmenu.cpp
-  votingmenu.h
-  whois.cpp
-  whois.h
 )
 set(GAME_GENERATED_SERVER
   src/generated/server_data.cpp
@@ -2056,7 +2098,7 @@ endforeach()
 
 foreach(target ${TARGETS_OWN})
   if((CMAKE_VERSION VERSION_GREATER 3.1 OR CMAKE_VERSION VERSION_EQUAL 3.1) AND NOT TARGET_OS STREQUAL "mac")
-    set_property(TARGET ${target} PROPERTY CXX_STANDARD 17)
+    set_property(TARGET ${target} PROPERTY CXX_STANDARD 20)
     set_property(TARGET ${target} PROPERTY CXX_STANDARD_REQUIRED ON)
   endif()
 
@@ -2065,6 +2107,7 @@ foreach(target ${TARGETS_OWN})
     target_compile_options(${target} PRIVATE /wd4244) # Possible loss of data (float -> int, int -> float, etc.).
     target_compile_options(${target} PRIVATE /wd4267) # Possible loss of data (size_t - int on win64).
     target_compile_options(${target} PRIVATE /wd4800) # Implicit conversion of int to bool.
+    target_compile_options(${target} PRIVATE /wd5055) # C++20 operator deprecated between enumerations and floating-point types
   endif()
   if(OUR_FLAGS_OWN)
     target_compile_options(${target} PRIVATE ${OUR_FLAGS_OWN})

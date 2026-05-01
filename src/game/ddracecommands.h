@@ -95,9 +95,9 @@ CONSOLE_COMMAND("dummymode", "?v[id] ?i[dummymode]", CFGFLAG_SERVER, ConDummymod
 CONSOLE_COMMAND("connectdefaultdummies", "", CFGFLAG_SERVER, ConConnectDefaultDummies, this, "Connects default dummies", AUTHED_ADMIN)
 
 //tune lock player
-CONSOLE_COMMAND("tune_lock_pl", "v[id] s[tuning] i[value]", CFGFLAG_SERVER, ConTuneLockPlayer, this, "Tune for lock a variable to value for player v", AUTHED_ADMIN)
+CONSOLE_COMMAND("tune_lock_pl", "v[id] s[tuning] ?i[value]", CFGFLAG_SERVER, ConTuneLockPlayer, this, "Tune for lock a variable to value for player v", AUTHED_ADMIN)
 CONSOLE_COMMAND("tune_lock_pl_reset", "v[id] ?s[tuning]", CFGFLAG_SERVER, ConTuneLockPlayerReset, this, "Reset all locked tuning variables to defaults for player v (specific or all)", AUTHED_ADMIN)
-CONSOLE_COMMAND("tune_lock_pl_dump", "v[id]", CFGFLAG_SERVER, ConTuneLockPlayerDump, this, "Dump lock tuning for player v", AUTHED_ADMIN)
+CONSOLE_COMMAND("tune_lock_pl_dump", "v[id]", CFGFLAG_SERVER, ConTuneLockPlayerDump, this, "Dump lock tuning for player v", AUTHED_HELPER)
 
 //power
 CONSOLE_COMMAND("forceflagowner", "i[flag] ?i[id]", CFGFLAG_SERVER|CMDFLAG_TEST, ConForceFlagOwner, this, "Gives flag i to player i (0 = red, 1 = blue) (to return flag, set id = -1)", AUTHED_ADMIN)
@@ -132,9 +132,12 @@ CONSOLE_COMMAND("whois", "i[mode] i[cutoff] r[name]", CFGFLAG_SERVER, ConWhoIs, 
 CONSOLE_COMMAND("whoisid", "i[mode] i[cutoff] v[id]", CFGFLAG_SERVER, ConWhoIsID, this, "Mode 0=ip, 1=name, cutoff 0=direct, 1=/24, 2=/16", AUTHED_ADMIN)
 
 // white list in case iphub.info falsely flagged someone or to whitelist gameserver ips
-CONSOLE_COMMAND("whitelist_add", "s[ip] ?s[reason]", CFGFLAG_SERVER, ConWhitelistAdd, this, "Adds address s to whitelist", AUTHED_ADMIN)
+CONSOLE_COMMAND("whitelist_add", "s[ip] ?r[reason]", CFGFLAG_SERVER, ConWhitelistAdd, this, "Adds address s to whitelist", AUTHED_ADMIN)
 CONSOLE_COMMAND("whitelist_remove", "s[ip/index]", CFGFLAG_SERVER, ConWhitelistRemove, this, "Removes address s from whitelist", AUTHED_ADMIN)
-CONSOLE_COMMAND("whitelist", "", CFGFLAG_SERVER, ConWhitelist, this, "Shows whitelist for DNSBL/PGSC", AUTHED_ADMIN)
+CONSOLE_COMMAND("whitelist", "", CFGFLAG_SERVER, ConWhitelist, this, "Shows whitelist for DNSBL/PGSC/Antibot", AUTHED_ADMIN)
+CONSOLE_COMMAND("whitelist_save", "s[file]", CFGFLAG_SERVER, ConWhitelistSave, this, "Save whitelist to file", AUTHED_ADMIN)
+CONSOLE_COMMAND("whitelist_update_servers", "", CFGFLAG_SERVER, ConWhitelistUpdateServers, this, "Notifies servers in sv_redirect_server_tile_ports and reloads whitelist (save before!)", AUTHED_ADMIN)
+CONSOLE_COMMAND("bans_update_servers", "", CFGFLAG_SERVER, ConBansUpdateServers, this, "Notifies servers in sv_redirect_server_tile_ports and reloads bans (save before!)", AUTHED_ADMIN)
 
 // bot lookup
 CONSOLE_COMMAND("bot_lookup", "", CFGFLAG_SERVER, ConBotLookup, this, "Bot lookup list", AUTHED_ADMIN)
@@ -163,7 +166,9 @@ CONSOLE_COMMAND("set_permille", "v[id] f[permille]", CFGFLAG_SERVER|CMDFLAG_TEST
 CONSOLE_COMMAND("sound", "i[sound]", CFGFLAG_SERVER, ConSound, this, "Plays the sound with id i", AUTHED_ADMIN)
 CONSOLE_COMMAND("lasertext", "v[id] r[text]", CFGFLAG_SERVER, ConLaserText, this, "Sends a laser text", AUTHED_ADMIN)
 CONSOLE_COMMAND("sendmotd", "v[id] i[footer] r[text]", CFGFLAG_SERVER, ConSendMotd, this, "Sends a motd containing text r to player v (i=1 with footer)", AUTHED_ADMIN)
-CONSOLE_COMMAND("helicopter", "?v[id] ?i[turrettype] ?f[scale]", CFGFLAG_SERVER|CMDFLAG_TEST, ConHelicopter, this, "Spawns helicopter at player v, turret type (i=0, i=1 minigun, i=2 missile), scale (0.8-5.0)", AUTHED_ADMIN)
+CONSOLE_COMMAND("spider", "?v[id] ?f[scale]", CFGFLAG_SERVER|CMDFLAG_TEST, ConSpider, this, "Spawns spider at v, scale(f=0.5-5)", AUTHED_ADMIN)
+CONSOLE_COMMAND("remove_spiders", "", CFGFLAG_SERVER, ConRemoveSpiders, this, "Removes all spiders", AUTHED_ADMIN)
+CONSOLE_COMMAND("helicopter", "?v[id] ?i[type] ?i[turret] ?f[scale]", CFGFLAG_SERVER|CMDFLAG_TEST, ConHelicopter, this, "Spawns helicopter at v, type(i=0-2), turret(i=0, i=1 minigun, i=2 missile), scale(f=1-5)", AUTHED_ADMIN)
 CONSOLE_COMMAND("remove_helicopters", "", CFGFLAG_SERVER, ConRemoveHelicopters, this, "Removes all helicopters", AUTHED_ADMIN)
 CONSOLE_COMMAND("snake", "?v[id]", CFGFLAG_SERVER|CMDFLAG_TEST, ConSnake, this, "Toggles snake for player v", AUTHED_ADMIN)
 
@@ -172,6 +177,8 @@ CONSOLE_COMMAND("force_transform_zombie", "?v[id]", CFGFLAG_SERVER|CMDFLAG_TEST,
 CONSOLE_COMMAND("force_transform_human", "?v[id]", CFGFLAG_SERVER|CMDFLAG_TEST, ConForceTransformHuman, this, "Forces transformation to human for player v", AUTHED_ADMIN)
 CONSOLE_COMMAND("set_double_xp_lifes", "v[id] i[amount]", CFGFLAG_SERVER|CMDFLAG_TEST, ConSetDoubleXpLifes, this, "Sets double xp lifes for player v", AUTHED_ADMIN)
 CONSOLE_COMMAND("set_taser_shield", "v[id] i[percentage]", CFGFLAG_SERVER|CMDFLAG_TEST, ConSetTaserShield, this, "Sets taser shield percentage for player v", AUTHED_ADMIN)
+CONSOLE_COMMAND("set_safe_area", "?v[id]", CFGFLAG_SERVER, ConSetSafeArea, this, "Sets player v safe area state", AUTHED_ADMIN)
+CONSOLE_COMMAND("unset_safe_area", "?v[id]", CFGFLAG_SERVER, ConUnsetSafeArea, this, "Unsets player v safe area state", AUTHED_ADMIN)
 
 //client information
 CONSOLE_COMMAND("player_name", "v[id] ?r[name]", CFGFLAG_SERVER, ConPlayerName, this, "Sets name of player v", AUTHED_ADMIN)
@@ -208,11 +215,12 @@ CONSOLE_COMMAND("ddracemode", "?v[id]", CFGFLAG_SERVER, ConDDraceMode, this, "De
 CONSOLE_COMMAND("bloody", "?v[id]", CFGFLAG_SERVER, ConBloody, this, "Toggles bloody for player v", AUTHED_ADMIN)
 CONSOLE_COMMAND("strongbloody", "?v[id]", CFGFLAG_SERVER, ConStrongBloody, this, "Toggles strong bloody for player v", AUTHED_ADMIN)
 
-CONSOLE_COMMAND("alwaysteleweapon", "?v[id]", CFGFLAG_SERVER|CMDFLAG_TEST, ConAlwaysTeleWeapon, this, "Lets player v always use tele weapons", AUTHED_ADMIN)
+CONSOLE_COMMAND("alwaysteleweapon", "i[mode] ?v[id]", CFGFLAG_SERVER|CMDFLAG_TEST, ConAlwaysTeleWeapon, this, "Lets player v always use tele weapons (1=red/evil, 2=blue/keep velocity)", AUTHED_ADMIN)
 CONSOLE_COMMAND("telegun", "?v[id]", CFGFLAG_SERVER|CMDFLAG_TEST, ConTeleGun, this, "Gives a tele gun to player v", AUTHED_ADMIN)
 CONSOLE_COMMAND("telegrenade", "?v[id]", CFGFLAG_SERVER|CMDFLAG_TEST, ConTeleGrenade, this, "Gives a tele grenade to player v", AUTHED_ADMIN)
 CONSOLE_COMMAND("telelaser", "?v[id]", CFGFLAG_SERVER|CMDFLAG_TEST, ConTeleLaser, this, "Gives a tele laser to player v", AUTHED_ADMIN)
 CONSOLE_COMMAND("doorhammer", "?v[id]", CFGFLAG_SERVER|CMDFLAG_TEST, ConDoorHammer, this, "Gives a door hammer to player v", AUTHED_ADMIN)
+CONSOLE_COMMAND("projectilehammer", "?v[id]", CFGFLAG_SERVER|CMDFLAG_TEST, ConProjectileHammer, this, "Gives a projectile hammer to player v", AUTHED_ADMIN)
 
 CONSOLE_COMMAND("lovely", "?v[id]", CFGFLAG_SERVER, ConLovely, this, "Toggles lovely for player v", AUTHED_ADMIN)
 CONSOLE_COMMAND("rotatingball", "?v[id]", CFGFLAG_SERVER, ConRotatingBall, this, "Toggles rotating ball for player v", AUTHED_ADMIN)

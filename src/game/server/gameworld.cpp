@@ -11,6 +11,9 @@
 #include <utility>
 #include <engine/shared/config.h>
 #include "gamemodes/DDRace.h"
+#include "entities/weapons/projectile.h"
+#include "entities/weapons/custom_projectile.h"
+#include "entities/weapons/missile.h"
 
 void CSelectedArea::Init(CGameContext *pGameServer)
 {
@@ -148,7 +151,7 @@ void CGameWorld::Snap(int SnappingClient)
 	std::vector<CEntity *> vpPlotObjects;
 	for(int i = 0; i < NUM_ENTTYPES; i++)
 	{
-		if(i == ENTTYPE_CHARACTER)
+		if(i == ENTTYPE_CHARACTER || i == ENTTYPE_DRAWTILE)
 			continue;
 
 		for(CEntity *pEnt = m_apFirstEntityTypes[i]; pEnt; )
@@ -162,6 +165,11 @@ void CGameWorld::Snap(int SnappingClient)
 		}
 	}
 
+	// never iterate through all drawtiles
+	m_DrawTiles.ProcessRemovals();
+	for (auto &pDrawTile : m_DrawTiles.ResponsibleTiles())
+		pDrawTile->Snap(SnappingClient);
+
 	// snap plot objects after we got everything else, so we dont fill the snap with plot objects before everything important
 	for (unsigned int i = 0; i < vpPlotObjects.size(); i++)
 		vpPlotObjects[i]->Snap(SnappingClient);
@@ -170,12 +178,17 @@ void CGameWorld::Snap(int SnappingClient)
 void CGameWorld::PostSnap()
 {
 	for(int i = 0; i < NUM_ENTTYPES; i++)
+	{
+		if (i == ENTTYPE_DRAWTILE)
+			continue;
+
 		for(CEntity *pEnt = m_apFirstEntityTypes[i]; pEnt; )
 		{
 			m_pNextTraverseEntity = pEnt->m_pNextTypeEntity;
 			pEnt->PostSnap();
 			pEnt = m_pNextTraverseEntity;
 		}
+	}
 }
 
 void CGameWorld::Reset()
@@ -238,14 +251,33 @@ void CGameWorld::UpdatePlayerMap(int ClientID)
 	if (ClientID == -1)
 	{
 		bool Update = Server()->Tick() % Config()->m_SvMapUpdateRate == 0;
+
+		// We use m_Teams.Count in ReserveTeamSlots
+		/*if (Update && !Config()->m_SvSoloServer)
+		{
+			// Cache team sizes to avoid more loops
+			std::fill(std::begin(m_aTeamSizes), std::end(m_aTeamSizes), 0);
+			for(int i = 0; i < MAX_CLIENTS; i++)
+			{
+				CPlayer *pPlayer = GameServer()->m_apPlayers[i];
+				if(!pPlayer)
+					continue;
+				int DDTeam = GameServer()->GetDDRaceTeam(i);
+				m_aTeamSizes[DDTeam]++;
+			}
+		}*/
+
 		for (int i = 0; i < MAX_CLIENTS; i++)
 		{
+			if (!GameServer()->m_apPlayers[i])
+				continue;
+
 			// Calculate overhang every tick, not only when the map updates
-			int Overhang = max(0, Server()->NumClients() - m_aMap[i].GetMapSize());
+			int Overhang = maximum(0, Server()->NumClients() - m_aMap[i].GetMapSize());
 			if (Overhang != m_aMap[i].m_TotalOverhang)
 			{
 				m_aMap[i].m_TotalOverhang = Overhang;
-				m_aMap[i].m_NumPages = std::max(1, (Overhang + PlayerMap::SSeeOthers::MAX_NUM_SEE_OTHERS - 1) / PlayerMap::SSeeOthers::MAX_NUM_SEE_OTHERS);
+				m_aMap[i].m_NumPages = maximum(1, (Overhang + PlayerMap::SSeeOthers::MAX_NUM_SEE_OTHERS - 1) / PlayerMap::SSeeOthers::MAX_NUM_SEE_OTHERS);
 				if (m_aMap[i].m_TotalOverhang <= 0 && m_aMap[i].m_SeeOthersState != PlayerMap::SSeeOthers::STATE_NONE)
 					m_aMap[i].ResetSeeOthers();
 
@@ -308,7 +340,7 @@ void CGameWorld::PlayerMap::CycleSeeOthers()
 		if (m_pMap[i] != -1)
 			m_aWasSeeOthers[m_pMap[i]] = true;
 
-	int Size = min(m_TotalOverhang, (int)PlayerMap::SSeeOthers::MAX_NUM_SEE_OTHERS);
+	int Size = minimum(m_TotalOverhang, (int)PlayerMap::SSeeOthers::MAX_NUM_SEE_OTHERS);
 	int Added = 0;
 	int MapID = GetMapSize()-1;
 	for (int i = 0; i < MAX_CLIENTS; i++)
@@ -420,48 +452,35 @@ void CGameWorld::PlayerMap::Init(int ClientID, CGameWorld *pGameWorld)
 	m_pGameWorld = pGameWorld;
 	m_pMap = m_pGameWorld->Server()->GetIdMap(m_ClientID);
 	m_pReverseMap = m_pGameWorld->Server()->GetReverseIdMap(m_ClientID);
-	m_UpdateTeamsState = false;
+	m_ResortReserved = false;
+	m_NumPages = 0;
+	m_TotalOverhang = 0;
+	m_NumReserved = 0;
 	ResetSeeOthers();
 }
 
-void CGameWorld::PlayerMap::InitPlayer(bool Rejoin)
+void CGameWorld::PlayerMap::InitPlayer(bool Rejoin, bool Timeout)
 {
 	for (int i = 0; i < MAX_CLIENTS; i++)
 		m_aReserved[i] = false;
 
-	// make sure no rests from before are in the client, so we can freshly start and insert our stuff
-	if (Rejoin)
-	{
-		m_UpdateTeamsState = true; // to get flag spectators back and all teams aswell
-
-		for (int i = 0; i < MAX_CLIENTS; i++)
-			Remove(i);
-	}
-
-	for (int i = 0; i < MAX_CLIENTS; i++)
-		m_pMap[i] = -1;
-
-	for (int i = 0; i < MAX_CLIENTS; i++)
-		m_pReverseMap[i] = -1;
-
-	if (GetPlayer()->m_IsDummy)
-		return; // just need to initialize the arrays
-
 	int NextFreeID = 0;
 	NETADDR OwnAddr, Addr;
 	m_pGameWorld->Server()->GetClientAddr(m_ClientID, &OwnAddr);
-	while (1)
+	while (true && !GetPlayer()->m_IsDummy)
 	{
 		bool Break = true;
 		for (int i = 0; i < MAX_CLIENTS; i++)
 		{
-			if (!m_pGameWorld->GameServer()->m_apPlayers[i] || m_pGameWorld->GameServer()->m_apPlayers[i]->m_IsDummy || i == m_ClientID)
+			if (!m_pGameWorld->GameServer()->m_apPlayers[i] || m_pGameWorld->GameServer()->m_apPlayers[i]->m_IsDummy)
 				continue;
 
 			m_pGameWorld->Server()->GetClientAddr(i, &Addr);
 			if (net_addr_comp(&OwnAddr, &Addr, false) == 0)
 			{
-				if (m_pGameWorld->m_aMap[i].m_pReverseMap[i] == NextFreeID)
+				// For 0.7 timeout: Rejoin has to check ourselves because it's the id of the old connection that we want to skip
+				// Do not access our own reverse map on initial initialization, as it's only initialized below
+				if ((i != m_ClientID || Timeout) && m_pGameWorld->m_aMap[i].m_pReverseMap[i] == NextFreeID)
 				{
 					NextFreeID++;
 					Break = false;
@@ -472,6 +491,23 @@ void CGameWorld::PlayerMap::InitPlayer(bool Rejoin)
 		if (Break)
 			break;
 	}
+
+	// make sure no rests from before are in the client, so we can freshly start and insert our stuff
+	if (Rejoin)
+	{
+		m_UpdateTeamsState = true; // to get flag spectators back and all teams aswell
+		for (int i = 0; i < MAX_CLIENTS; i++)
+			Remove(i);
+	}
+
+	// Clear map, for 0.7 timeouts do this after we got our id back
+	for (int i = 0; i < MAX_CLIENTS; i++)
+		m_pMap[i] = -1;
+	for (int i = 0; i < MAX_CLIENTS; i++)
+		m_pReverseMap[i] = -1;
+
+	if (GetPlayer()->m_IsDummy)
+		return; // just need to initialize the arrays
 
 	m_NumReserved = 1;
 	m_pMap[m_pGameWorld->Server()->GetMaxClients(m_ClientID) - 1] = -1; // player with empty name to say chat msgs
@@ -555,9 +591,20 @@ void CGameWorld::PlayerMap::Add(int MapID, int ClientID)
 	Remove(m_pReverseMap[ClientID]);
 
 	int OldClientID = Remove(MapID);
-	if ((OldClientID == -1 && m_pGameWorld->GameServer()->GetDDRaceTeam(ClientID) > 0)
-		|| (OldClientID != -1 && m_pGameWorld->GameServer()->GetDDRaceTeam(OldClientID) != m_pGameWorld->GameServer()->GetDDRaceTeam(ClientID)))
-		m_UpdateTeamsState = true;
+	// update teams state for teams and safe area (not a real team, as it's still individual per team actually)
+	CTeamsCore *pTeamsCore = &((CGameControllerDDRace *)m_pGameWorld->GameServer()->m_pController)->m_Teams.m_Core;
+	if (OldClientID == -1)
+	{
+		if (m_pGameWorld->GameServer()->GetDDRaceTeam(ClientID) > 0 || !pTeamsCore->GetInGame(ClientID))
+			m_UpdateTeamsState = true;
+	}
+	else
+	{
+		if (m_pGameWorld->GameServer()->GetDDRaceTeam(OldClientID) != m_pGameWorld->GameServer()->GetDDRaceTeam(ClientID))
+			m_UpdateTeamsState = true;
+		if (pTeamsCore->GetInGame(OldClientID) != pTeamsCore->GetInGame(ClientID))
+			m_UpdateTeamsState = true;
+	}
 
 	if (m_aReserved[ClientID])
 		m_ResortReserved = true;
@@ -575,7 +622,8 @@ int CGameWorld::PlayerMap::Remove(int MapID)
 	int ClientID = m_pMap[MapID];
 	if (ClientID != -1)
 	{
-		if (m_pGameWorld->GameServer()->GetDDRaceTeam(ClientID) > 0)
+		CTeamsCore *pTeamsCore = &((CGameControllerDDRace *)m_pGameWorld->GameServer()->m_pController)->m_Teams.m_Core;
+		if (m_pGameWorld->GameServer()->GetDDRaceTeam(ClientID) > 0 || !pTeamsCore->GetInGame(ClientID))
 			m_UpdateTeamsState = true;
 
 		if (m_aReserved[ClientID])
@@ -610,6 +658,12 @@ void CGameWorld::PlayerMap::Update()
 			continue;
 		}
 
+		// If a team (not 0) has more than 10 players, do not reserve their slots because it can get messy quickly if a few huge teams form.
+		// To keep teams state the same on main and dummy big teams do not get highlighted at all.
+		int DDTeam = m_pGameWorld->GameServer()->GetDDRaceTeam(i);
+		bool ReserveTeamSlots = m_pGameWorld->ReserveTeamSlots(DDTeam, i);
+		bool IsInSafeArea = pPlayer->GetCharacter() && pPlayer->GetCharacter()->IsInSafeArea();
+
 		if (m_aReserved[i])
 		{
 			NETADDR OwnAddr, Addr;
@@ -617,8 +671,15 @@ void CGameWorld::PlayerMap::Update()
 			m_pGameWorld->Server()->GetClientAddr(i, &Addr);
 			if (net_addr_comp(&OwnAddr, &Addr, false) != 0)
 			{
-				if (ResortReserved || !m_pGameWorld->GameServer()->GetDDRaceTeam(i)) // condition to unset reserved slot
+				bool UnsetReservedSlot = !ReserveTeamSlots && !IsInSafeArea; // condition to unset reserved slot
+				if (ResortReserved || UnsetReservedSlot)
+				{
 					m_aReserved[i] = false;
+
+					// reset our team to 0 when we are in a big team for example
+					if(DDTeam != TEAM_FLOCK)
+						m_UpdateTeamsState = true;
+				}
 			}
 			continue;
 		}
@@ -626,7 +687,7 @@ void CGameWorld::PlayerMap::Update()
 			continue;
 
 		int Insert = -1;
-		if (m_pGameWorld->GameServer()->GetDDRaceTeam(i))
+		if ((DDTeam != TEAM_FLOCK && ReserveTeamSlots) || IsInSafeArea)
 		{
 			for (int j = 0; j < GetMapSize()-m_NumSeeOthers; j++)
 			{
@@ -689,6 +750,17 @@ void CGameWorld::PlayerMap::InsertNextEmpty(int ClientID)
 	}
 }
 
+bool CGameWorld::ReserveTeamSlots(int DDTeam, int AskerID)
+{
+	if (GameServer()->GetClientDDNetVersion(AskerID) >= VERSION_DDNET_128)
+		return true;
+
+	//int TeamSize = m_aTeamSizes[DDTeam];
+	CGameControllerDDRace *pController = (CGameControllerDDRace*)GameServer()->m_pController;
+	int TeamSize = pController->m_Teams.Count(DDTeam);
+	return !Config()->m_SvSoloServer && DDTeam != TEAM_FLOCK && TeamSize <= Config()->m_SvPlayerMapMaxTeamSize;
+}
+
 int CGameWorld::PlayerMap::GetMapSize()
 {
 	return m_pGameWorld->Server()->GetMaxClients(m_ClientID) - m_NumReserved;
@@ -703,12 +775,17 @@ void CGameWorld::Tick()
 	{
 		// update all objects
 		for(int i = 0; i < NUM_ENTTYPES; i++)
+		{
+			if (i == ENTTYPE_DRAWTILE)
+				continue;
+				
 			for(CEntity *pEnt = m_apFirstEntityTypes[i]; pEnt; )
 			{
 				m_pNextTraverseEntity = pEnt->m_pNextTypeEntity;
 				pEnt->TickPaused();
 				pEnt = m_pNextTraverseEntity;
 			}
+		}
 	}
 	else
 	{
@@ -724,7 +801,7 @@ void CGameWorld::Tick()
 		for(int i = 0; i < NUM_ENTTYPES; i++)
 		{
 			// processed above
-			if (i == ENTTYPE_LIGHTNING_LASER)
+			if (i == ENTTYPE_LIGHTNING_LASER || i == ENTTYPE_DRAWTILE)
 				continue;
 
 			for(CEntity *pEnt = m_apFirstEntityTypes[i]; pEnt; )
@@ -751,15 +828,25 @@ void CGameWorld::Tick()
 				m_PoliceFarm.m_NumPoliceTilePlayers++;
 			}
 		}
-		m_PoliceFarm.m_MaxPoliceTilePlayers = Config()->m_SvPoliceFarmLimit ? clamp((int)floor(NumCharacters * 0.125f + 3), 3, 16) : 0;
+
+		const int Limit = Config()->m_SvPoliceFarmLimit;
+		if (Limit == 0)
+			m_PoliceFarm.m_MaxPoliceTilePlayers = 0;
+		else
+			m_PoliceFarm.m_MaxPoliceTilePlayers = Limit != -1 ? Limit : clamp((int)floor(NumCharacters * 0.125f + 3), 3, 16);
 
 		for(int i = 0; i < NUM_ENTTYPES; i++)
+		{
+			if (i == ENTTYPE_DRAWTILE)
+				continue;
+				
 			for(CEntity *pEnt = m_apFirstEntityTypes[i]; pEnt; )
 			{
 				m_pNextTraverseEntity = pEnt->m_pNextTypeEntity;
 				pEnt->TickDeferred();
 				pEnt = m_pNextTraverseEntity;
 			}
+		}
 	}
 
 	RemoveEntities();
@@ -833,7 +920,7 @@ CCharacter* CGameWorld::IntersectCharacter(vec2 Pos0, vec2 Pos1, float Radius, v
 }
 
 
-CEntity *CGameWorld::ClosestEntity(vec2 Pos, float Radius, int Type, CEntity *pNotThis, bool CheckWall, int Team)
+CEntity *CGameWorld::ClosestEntity(vec2 Pos, float Radius, int Type, CEntity *pNotThis, int Team, bool CheckWall)
 {
 	// Find other players
 	float ClosestRange = Radius*2;
@@ -870,8 +957,14 @@ CEntity *CGameWorld::ClosestEntity(vec2 Pos, float Radius, int Type, CEntity *pN
 	return pClosest;
 }
 
-CCharacter* CGameWorld::ClosestCharacter(vec2 Pos, float Radius, CEntity* pNotThis, int CollideWith, bool CheckPassive, bool CheckWall, bool CheckMinigameTee, int Team, bool CheckDrivers)
+CCharacter* CGameWorld::ClosestCharacter(vec2 Pos, float Radius, CEntity* pNotThis, int CollideWith, int Team, int Flags)
 {
+	// Default flags if nothing is specified
+	if (Flags == -1)
+	{
+		Flags = EFindEntFlag::PASSIVE | EFindEntFlag::IN_HELICOPTER | EFindEntFlag::SAFE_AREA;
+	}
+
 	// Find other players
 	float ClosestRange = Radius * 2;
 	CCharacter* pClosest = 0;
@@ -885,14 +978,14 @@ CCharacter* CGameWorld::ClosestCharacter(vec2 Pos, float Radius, CEntity* pNotTh
 		if (Team != -1 && Team != p->Team())
 			continue;
 
-		if (CollideWith != -1 && !p->CanCollide(CollideWith, CheckPassive))
+		if (CollideWith != -1 && !p->CanCollide(CollideWith, Flags & EFindEntFlag::PASSIVE, Flags & EFindEntFlag::SAFE_AREA))
 			continue;
 
-		if (CheckDrivers && p->m_pHelicopter)
+		if (Flags & EFindEntFlag::IN_HELICOPTER && p->m_pVehicle)
 			continue;
 
 		float Len = distance(Pos, p->m_Pos);
-		if (CheckMinigameTee && p->GetPlayer()->IsMinigame() && p->GetPlayer()->m_SavedMinigameTee)
+		if (Flags & EFindEntFlag::MINIGAME_TEE && p->GetPlayer()->IsMinigame() && p->GetPlayer()->m_SavedMinigameTee)
 		{
 			float LenMinigame = distance(Pos, p->GetPlayer()->m_MinigameTee.GetPos());
 			if (LenMinigame < Len)
@@ -903,7 +996,7 @@ CCharacter* CGameWorld::ClosestCharacter(vec2 Pos, float Radius, CEntity* pNotTh
 		{
 			if (Len < ClosestRange)
 			{
-				if (CheckWall && GameServer()->Collision()->IntersectLine(Pos, p->GetPos(), 0, 0))
+				if (Flags & EFindEntFlag::WALL && GameServer()->Collision()->IntersectLine(Pos, p->GetPos(), 0, 0))
 					continue;
 
 				ClosestRange = Len;
@@ -958,7 +1051,7 @@ void CGameWorld::ReleaseHooked(int ClientID)
 
 // F-DDrace
 
-CCharacter* CGameWorld::ClosestCharacter(vec2 Pos, CCharacter* pNotThis, int CollideWith, int Mode)
+CCharacter* CGameWorld::ClosestCharacterMode(vec2 Pos, CCharacter* pNotThis, int CollideWith, int Mode)
 {
 	// Find other players
 	float ClosestRange = 0.f;
@@ -976,7 +1069,7 @@ CCharacter* CGameWorld::ClosestCharacter(vec2 Pos, CCharacter* pNotThis, int Col
 
 		if (Mode == 1) // BlmapChill police freeze hole right side
 		{
-			if ((!GameServer()->m_Accounts[p->GetPlayer()->GetAccID()].m_PoliceLevel && !p->m_PoliceHelper) || p->GetPlayer()->m_EscapeTime || p->m_FreezeTime == 0 || p->m_Pos.y > 438 * 32 || p->m_Pos.x < 430 * 32 || p->m_Pos.x > 445 * 32 || p->m_Pos.y < 423 * 32)
+			if ((!GameServer()->m_Accounts.Get(p->GetPlayer()->GetAccID()).m_PoliceLevel && !p->m_PoliceHelper) || p->GetPlayer()->m_EscapeTime || p->m_FreezeTime == 0 || p->m_Pos.y > 438 * 32 || p->m_Pos.x < 430 * 32 || p->m_Pos.x > 445 * 32 || p->m_Pos.y < 423 * 32)
 				continue;
 		}
 		if (Mode == 2) // for dummy 29
@@ -1021,7 +1114,7 @@ CCharacter* CGameWorld::ClosestCharacter(vec2 Pos, CCharacter* pNotThis, int Col
 		}
 		if (Mode == 10) // BlmapChill police freeze pit left side
 		{
-			if ((!GameServer()->m_Accounts[p->GetPlayer()->GetAccID()].m_PoliceLevel && !p->m_PoliceHelper) || p->GetPlayer()->m_EscapeTime || p->m_FreezeTime == 0 || p->m_Pos.y > 436 * 32 || p->m_Pos.x < 363 * 32 || p->m_Pos.x > 381 * 32 || p->m_Pos.y < 420 * 32)
+			if ((!GameServer()->m_Accounts.Get(p->GetPlayer()->GetAccID()).m_PoliceLevel && !p->m_PoliceHelper) || p->GetPlayer()->m_EscapeTime || p->m_FreezeTime == 0 || p->m_Pos.y > 436 * 32 || p->m_Pos.x < 363 * 32 || p->m_Pos.x > 381 * 32 || p->m_Pos.y < 420 * 32)
 				continue;
 		}
 
@@ -1065,22 +1158,23 @@ int CGameWorld::GetClosestHouseDummy(vec2 Pos, CCharacter* pNotThis, int Type, i
 	return pClosest ? pClosest->GetPlayer()->GetCID() : GameServer()->GetHouseDummy(Type);
 }
 
-CEntity *CGameWorld::ClosestEntityTypes(vec2 Pos, float Radius, int Types, CEntity *pNotThis, int CollideWith, bool CheckPassive, bool CheckDrivers)
+CEntity *CGameWorld::ClosestEntityTypes(vec2 Pos, float Radius, int64 Types, CEntity *pNotThis, int CollideWith, int Flags)
 {
 	for (int i = 0; i < NUM_ENTTYPES; i++)
 	{
-		if (!(Types&1<<i))
+		if (!(Types&(1ULL<<i)))
 			continue;
 
 		if (i == ENTTYPE_CHARACTER)
 		{
-			CCharacter* pChr = ClosestCharacter(Pos, Radius, pNotThis, CollideWith, CheckPassive, false, false, -1, CheckDrivers);
+			CCharacter* pChr = ClosestCharacter(Pos, Radius, pNotThis, CollideWith, -1, Flags);
 			if (pChr)
 				return pChr;
 		}
 		else
 		{
-			CEntity* pEntity = ClosestEntity(Pos, Radius, i, pNotThis);
+			bool CheckWall = Flags != -1 && Flags & EFindEntFlag::WALL;
+			CEntity* pEntity = ClosestEntity(Pos, Radius, i, pNotThis, -1, CheckWall);
 			if (pEntity)
 				return pEntity;
 		}
@@ -1089,13 +1183,15 @@ CEntity *CGameWorld::ClosestEntityTypes(vec2 Pos, float Radius, int Types, CEnti
 	return 0;
 }
 
-int CGameWorld::FindEntitiesTypes(vec2 Pos, float Radius, CEntity **ppEnts, int Max, int Types, int Team)
+static const float s_ProjectileHammerRadius = CCharacterCore::PHYS_SIZE * 2.f;
+
+int CGameWorld::FindEntitiesTypes(vec2 Pos, float Radius, CEntity **ppEnts, int Max, int64 Types, int Team, bool ProjHammer)
 {
 	int Num = 0;
 
 	for (int i = 0; i < NUM_ENTTYPES; i++)
 	{
-		if (!(Types&1<<i))
+		if (!(Types&(1ULL<<i)))
 			continue;
 
 		for(CEntity *pEnt = m_apFirstEntityTypes[i]; pEnt; pEnt = pEnt->m_pNextTypeEntity)
@@ -1106,9 +1202,42 @@ int CGameWorld::FindEntitiesTypes(vec2 Pos, float Radius, CEntity **ppEnts, int 
 					continue;
 				if (pEnt->IsAdvancedEntity() && Team != ((CAdvancedEntity*)pEnt)->GetDDTeam())
 					continue;
+				if (i == ENTTYPE_PROJECTILE && Team != ((CProjectile*)pEnt)->DDTeam())
+					continue;
+				if (i == ENTTYPE_CUSTOM_PROJECTILE && Team != ((CCustomProjectile*)pEnt)->DDTeam())
+					continue;
+				if (i == ENTTYPE_MISSILE && Team != ((CMissile*)pEnt)->DDTeam())
+					continue;
 			}
 
-			if(distance(pEnt->m_Pos, Pos) < Radius+pEnt->m_ProximityRadius)
+			vec2 EntPos = pEnt->m_Pos;
+			float EntRadius = pEnt->m_ProximityRadius;
+			if (ProjHammer && (i == ENTTYPE_PROJECTILE || i == ENTTYPE_CUSTOM_PROJECTILE || i == ENTTYPE_MISSILE))
+			{
+				// projectiles have a ProximityRadius of 0, unhittable
+				EntRadius = s_ProjectileHammerRadius;
+				
+				if (i == ENTTYPE_PROJECTILE) // fetch current position
+				{
+					// only allow projectiles shot by players
+					if (((CProjectile *)pEnt)->GetOwner() == -1)
+						continue;
+					EntPos = ((CProjectile *)pEnt)->m_CurPos;
+				}
+				else if (i == ENTTYPE_CUSTOM_PROJECTILE)
+				{
+					// only allow projectiles shot by players, even though custom projectiles currently cant be map placed
+					if (((CCustomProjectile *)pEnt)->GetOwner() == -1)
+						continue;
+				}
+				else if (i == ENTTYPE_MISSILE)
+				{
+					if (((CMissile*)pEnt)->GetOwner() == -1)
+						continue;
+				}
+			}
+
+			if(distance(EntPos, Pos) < Radius+EntRadius)
 			{
 				if(ppEnts)
 					ppEnts[Num] = pEnt;
@@ -1122,45 +1251,62 @@ int CGameWorld::FindEntitiesTypes(vec2 Pos, float Radius, CEntity **ppEnts, int 
 	return Num;
 }
 
-CEntity *CGameWorld::IntersectEntityTypes(vec2 Pos0, vec2 Pos1, float Radius, vec2& NewPos, CEntity *pNotThis, int CollideWith, int Types, CCharacter *pThisOnly, bool CheckPlotTaserDestroy, bool PlotDoorOnly, bool CheckDrivers)
+CEntity *CGameWorld::IntersectEntityTypes(vec2 Pos0, vec2 Pos1, float Radius, vec2& NewPos, const CNotTheseEntities& NotThese, int CollideWith, int64 Types, CCharacter *pThisOnly, int Flags)
 {
+	if (Flags == -1)
+	{
+		Flags = EIntersectEntTypesFlag::IN_VEHICLE;
+	}
+
 	// Find other players
 	float ClosestLen = distance(Pos0, Pos1) * 100.0f;
 	CEntity *pClosest = 0;
 
 	int Team = CollideWith == -1 ? 0 : GameServer()->GetDDRaceTeam(CollideWith);
+	bool CheckPlotTaserDestroy = Flags & EIntersectEntTypesFlag::PLOT_TASER_DESTROY;
+
 	for (int i = 0; i < NUM_ENTTYPES; i++)
 	{
-		if (!(Types&1<<i))
+		if (!(Types&(1ULL<<i)))
 			continue;
 
 		CEntity *p = FindFirst(i);
 		for(; p; p = p->TypeNext())
  		{
 			float ProximityRadius = p->m_ProximityRadius;
-			bool EntTypeDestroyable = i == ENTTYPE_DOOR || i == ENTTYPE_PICKUP || i == ENTTYPE_BUTTON || i == ENTTYPE_SPEEDUP || i == ENTTYPE_TELEPORTER;
+			bool MarkForPredictPrevent = false;
+			CCharacter *pChr = 0;
+
+			bool EntTypeDestroyable = i == ENTTYPE_DOOR || i == ENTTYPE_PICKUP || i == ENTTYPE_BUTTON || i == ENTTYPE_SPEEDUP || i == ENTTYPE_TELEPORTER || i == ENTTYPE_DRAWTILE;
 			if ((CheckPlotTaserDestroy && !EntTypeDestroyable) || !CheckPlotTaserDestroy)
 			{
-				if(p == pNotThis)
+				if(NotThese.IsExcluded(p))
 					continue;
 
 				if (pThisOnly && p != pThisOnly)
 					continue;
 
-				if (i == ENTTYPE_CHARACTER && CheckDrivers && ((CCharacter *)p)->m_pHelicopter)
+				if (i == ENTTYPE_CHARACTER && Flags & EIntersectEntTypesFlag::IN_VEHICLE && ((CCharacter *)p)->m_pVehicle)
 					continue;
 
 				if (i == ENTTYPE_FLAG && ((CFlag *)p)->GetCarrier())
 					continue;
 
-				if (i == ENTTYPE_HELICOPTER && ((CHelicopter *)p)->IsBuilding())
+				if ((i == ENTTYPE_HELICOPTER || i == ENTTYPE_SPIDER) && ((IVehicle *)p)->IsInvincible())
 					continue;
 
 				if (CollideWith != -1)
 				{
-					CCharacter *pChr = 0;
 					if (i == ENTTYPE_CHARACTER)
+					{
 						pChr = (CCharacter *)p;
+						if ((Flags & EIntersectEntTypesFlag::PREVENT_EVENT_PREDICTION) && pChr->IsActiveProjectileHammer() && pChr->GetPlayer()->AntiPing())
+						{
+							// prevent explosion and damageind prediction as we redirect the projectile
+							MarkForPredictPrevent = true;
+							ProximityRadius = s_ProjectileHammerRadius * 3.f;
+						}
+					}
 					else if (p->IsAdvancedEntity())
 					{
 						pChr = ((CAdvancedEntity *)p)->GetOwner();
@@ -1175,13 +1321,13 @@ CEntity *CGameWorld::IntersectEntityTypes(vec2 Pos0, vec2 Pos1, float Radius, ve
 			else
 			{
 				int PlotID = p->m_PlotID;
-				if (!GameServer()->PlotCanBeRaided(PlotID))
+				if (!GameServer()->m_Plots.PlotCanBeRaided(PlotID))
 					continue;
 
 				if (i == ENTTYPE_DOOR)
 				{
 					bool IsPlotDoor = p->IsPlotDoor();
-					if (p->m_BrushCID != -1 || p->m_TransformCID != -1 || (PlotDoorOnly && !IsPlotDoor))
+					if (p->m_BrushCID != -1 || p->m_TransformCID != -1 || (Flags & EIntersectEntTypesFlag::PLOT_DOOR_ONLY && !IsPlotDoor))
 						continue;
 
 					CDoor *pDoor = (CDoor *)p;
@@ -1216,10 +1362,16 @@ CEntity *CGameWorld::IntersectEntityTypes(vec2 Pos0, vec2 Pos1, float Radius, ve
 			if (closest_point_on_line(Pos0, Pos1, p->m_Pos, IntersectPos))
 			{
 				float Len = distance(p->m_Pos, IntersectPos);
-//				dbg_msg("findentities", "%f", ProximityRadius+Radius);
-//				this is the function that looks for the heli right
 				if(Len < ProximityRadius+Radius)
 				{
+					if (MarkForPredictPrevent)
+					{
+						pChr->PreventEventPrediction();
+						// dont process if character is not actually nearby.
+						if(Len >= pChr->GetProximityRadius()+Radius)
+							continue;
+					}
+
 					Len = distance(Pos0, IntersectPos);
 					if(Len < ClosestLen)
 					{

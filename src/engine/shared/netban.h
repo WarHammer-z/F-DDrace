@@ -56,7 +56,7 @@ protected:
 		char aAddrStr1[NETADDR_MAXSTRSIZE], aAddrStr2[NETADDR_MAXSTRSIZE];
 		net_addr_str(&pData->m_LB, aAddrStr1, sizeof(aAddrStr1), false);
 		net_addr_str(&pData->m_UB, aAddrStr2, sizeof(aAddrStr2), false);
-		str_format(pBuffer, BufferSize, "'%s' - '%s'", aAddrStr1, aAddrStr2);
+		str_format(pBuffer, BufferSize, "<{'%s' - '%s'}>", aAddrStr1, aAddrStr2);
 		return pBuffer;
 	}
 
@@ -182,7 +182,6 @@ public:
 	template<class T> bool IsBannable(const T *pData);
 	bool IsBanned(const NETADDR *pAddr, char *pBuf, unsigned BufferSize, int *pLastInfoQuery);
 
-	static void ConBan(class IConsole::IResult *pResult, void *pUser);
 	static void ConUnban(class IConsole::IResult *pResult, void *pUser);
 	static void ConUnbanAll(class IConsole::IResult *pResult, void *pUser);
 	static void ConBans(class IConsole::IResult *pResult, void *pUser);

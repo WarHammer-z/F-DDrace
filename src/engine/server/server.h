@@ -171,6 +171,8 @@ public:
 		int m_LastInputTick;
 		CSnapshotStorage m_Snapshots;
 
+		CNetMsg_Sv_PreInput m_LastPreInput = {};
+
 		CInput m_LatestInput;
 		CInput m_aInputs[200]; // TODO: handle input better
 		int m_CurrentInput;
@@ -262,7 +264,7 @@ public:
 			char m_aCommand[512];
 		};
 		int m_DnsblState;
-		std::shared_ptr<CDnsblLookup> m_pDnsblLookup;
+		std::shared_ptr<IJob> m_pDnsblLookup; // CDnsblLookup or CHostLookup
 
 		class CPgscLookup : public IJob
 		{
@@ -292,6 +294,8 @@ public:
 		char m_aDDNetVersionStr[64];
 		CUuid m_ConnectionID;
 		int64_t m_RedirectDropTime;
+
+		bool m_HighBandwidth;
 	};
 
 	CClient m_aClients[MAX_CLIENTS];
@@ -323,6 +327,9 @@ public:
 	int m_PrintCBIndex;
 
 	int m_RconRestrict;
+
+	int m_LastBansUpdate;
+	int m_LastWhitelistUpdate;
 
 	// map
 	enum
@@ -459,6 +466,10 @@ public:
 	void SendMapListEntryRem(const CMapListEntry *pMapListEntry, int ClientID);
 	void UpdateClientMapListEntries();
 
+	// ddnet
+	void SendMaplistGroupStart(int ClientId);
+	void SendMaplistGroupEnd(int ClientId);
+
 	void ProcessClientPacket(CNetChunk *pPacket);
 
 	bool m_ServerInfoNeedsUpdate;
@@ -476,6 +487,9 @@ public:
 	void SendRedirectSaveTeeRemove(int Port, const char *pHash) override;
 	void SendRedirectSaveTeeImpl(bool Add, int Port, const char *pHash);
 	void SendPlayerCountUpdate(bool Shutdown = false) override;
+	bool SendWhitelistUpdate() override;
+	bool SendBansUpdate() override;
+	bool SendUpdateToConnectedServers(CPacker *pPacker);
 
 	void PumpNetwork();
 
@@ -503,6 +517,7 @@ public:
 	static void ConMapReload(IConsole::IResult *pResult, void *pUser);
 	static void ConSaveConfig(IConsole::IResult *pResult, void *pUser);
 	static void ConLogout(IConsole::IResult *pResult, void *pUser);
+	static void ConClearConsole(IConsole::IResult *pResult, void *pUser);
 
 	static void ConchainSpecialInfoupdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainPlayerSlotsUpdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
@@ -558,6 +573,9 @@ public:
 	const char* GetAnnouncementLine(char const* FileName) override;
 	unsigned m_AnnouncementLastLine;
 
+	void SetHighBandwidth(int ClientID, bool Value) override { m_aClients[ClientID].m_HighBandwidth = Value; }
+	bool GetHighBandwidth(int ClientID) override { return ClientID < 0 || m_aClients[ClientID].m_HighBandwidth; }
+
 	bool IsBrowserScoreFix();
 
 	void SetCountryCode(int ClientID, const char *pLanguageCode, bool Lookup, const char *pAddr);
@@ -591,18 +609,33 @@ public:
 		std::vector<NETADDR> m_vWhitelist;
 	} m_DnsblCache;
 
+	bool DnsblWhite(int ClientId) override
+	{
+		return m_aClients[ClientId].m_DnsblState == CClient::DNSBL_STATE_NONE ||
+		       m_aClients[ClientId].m_DnsblState == CClient::DNSBL_STATE_WHITELISTED;
+	}
+	bool DnsblPending(int ClientId) override
+	{
+		return m_aClients[ClientId].m_DnsblState == CClient::DNSBL_STATE_PENDING;
+	}
+	bool DnsblBlack(int ClientId) override
+	{
+		return m_aClients[ClientId].m_DnsblState == CClient::DNSBL_STATE_BLACKLISTED;
+	}
+
 	// white list in case iphub.info falsely flagged someone or to whitelist a server ip in case no proxy game server string is set and someone falsely got banned as "proxy game server"
 	struct SWhitelist
 	{
 		NETADDR m_Addr;
-		char m_aReason[64];
+		char m_aReason[128];
 	};
 	std::vector<SWhitelist> m_vWhitelist;
-	void SaveWhitelist() override;
+	void SaveWhitelist(const char *pFilename) override;
 	void AddWhitelist(const NETADDR *pAddr, const char *pReason) override;
 	void RemoveWhitelist(const NETADDR *pAddr) override;
 	void RemoveWhitelistByIndex(unsigned int Index) override;
 	void PrintWhitelist() override;
+	bool IsWhitelisted(int ClientID) override;
 
 	class CWebhook : public IJob
 	{
@@ -632,7 +665,7 @@ public:
 
 	struct SRecentlyLeft
 	{
-		int m_RemoveTick;
+		int m_RemoveTick = 0;
 		int m_PrevClientID;
 		char m_aVersion[64];
 		char m_aName[MAX_NAME_LENGTH];

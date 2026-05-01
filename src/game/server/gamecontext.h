@@ -13,19 +13,23 @@
 
 #include <vector>
 #include <string>
-#include "entities/pickup_drop.h"
-#include "entities/money.h"
-#include "entities/lasertext.h"
+#include "entities/interactive/pickup_drop.h"
+#include "entities/interactive/money.h"
+#include "entities/misc/lasertext.h"
+#include "entities/map/draweditor/drawtile.h"
 #include "houses/house.h"
 #include "minigames/minigame.h"
 #include "minigames/arenas.h"
 #include "minigames/durak.h"
+#include "minigames/survival.h"
 
 #include "eventhandler.h"
 #include "gameworld.h"
-#include "whois.h"
-#include "rainbowname.h"
-#include "votingmenu.h"
+#include "misc/whois.h"
+#include "misc/rainbowname.h"
+#include "misc/votingmenu.h"
+#include "misc/plots.h"
+#include "misc/accounts.h"
 
 #include "teehistorian.h"
 
@@ -39,7 +43,7 @@ typedef unsigned __int64 uint64_t;
 #include <stdint.h>
 #endif
 
-#include "mask128.h"
+#include "misc/mask128.h"
 
 /*
 	Tick
@@ -63,73 +67,33 @@ typedef unsigned __int64 uint64_t;
 
 */
 
-enum Survival
-{
-	SURVIVAL_OFFLINE = 0,
-	SURVIVAL_LOBBY,
-	SURVIVAL_PLAYING,
-	SURVIVAL_DEATHMATCH,
-
-	BACKGROUND_IDLE = -1,
-	BACKGROUND_LOBBY_WAITING,
-	BACKGROUND_LOBBY_COUNTDOWN,
-	BACKGROUND_DEATHMATCH_COUNTDOWN,
-};
-
-enum Top5
-{
-	TOP_LEVEL,
-	TOP_POINTS,
-	TOP_MONEY,
-	TOP_SPREE,
-	TOP_PORTAL_BATTERY,
-	TOP_PORTAL_BLOCKER,
-	TOP_DURAK_WINS,
-	TOP_DURAK_PROFIT,
-};
-
 enum
 {
-	// start for account ids and plot ids
-	ACC_START = 1, // account ids start with 1, 0 means not logged in
-	PLOT_START = 1,
-
-	// needed xp after the hardcoded requirements
-	DIFFERENCE_XP_END = 100,
-	OVER_LVL_100_XP = 2000000,
-
-	// item maximums
-	NUM_TASER_LEVELS = 10,
-	NUM_POLICE_LEVELS = 5,
-	MAX_TASER_BATTERY = 100,
-	MAX_PASSWORD_LENGTH = 128,
-
-	// update this one with every acc change you do
-	ACC_CURRENT_VERSION = 15,
-
-	// vip
-	VIP_CLASSIC = 1,
-	VIP_PLUS,
-
 	// motd
 	MOTD_MAX_LINES = 24,
 };
 
-enum
-{
-	TYPE_DONATION,
-	TYPE_PURCHASE
-};
-
-
-enum
-{
-	NUM_TUNEZONES = 256
-};
 
 class CRandomMapResult;
 class CMapVoteResult;
 struct CAntibotData;
+
+struct CSnapContext
+{
+	CSnapContext(int Version, bool Sevendown, int ClientId) :
+		m_ClientVersion(Version), m_Sevendown(Sevendown), m_ClientId(ClientId)
+	{
+	}
+
+	int GetClientVersion() const { return m_ClientVersion; }
+	bool IsSevendown() const { return m_Sevendown; }
+	bool ClientId() const { return m_ClientId; }
+
+private:
+	int m_ClientVersion;
+	bool m_Sevendown;
+	int m_ClientId;
+};
 
 class CGameContext : public IGameServer
 {
@@ -142,8 +106,8 @@ class CGameContext : public IGameServer
 	CCollision m_Collision;
 	CNetObjHandler m_NetObjHandler;
 	CTuningParams m_Tuning;
-	CTuningParams m_aTuningList[NUM_TUNEZONES];
-	LOCKED_TUNES m_vLockedTuning[NUM_TUNEZONES];
+	CTuningParams m_aTuningList[TuneZone::NUM];
+	LOCKED_TUNES m_vLockedTuning[TuneZone::NUM];
 
 	bool m_TeeHistorianActive;
 	CTeeHistorian m_TeeHistorian;
@@ -167,10 +131,13 @@ class CGameContext : public IGameServer
 	static void ConTuneSetZoneMsgLeave(IConsole::IResult* pResult, void* pUserData);
 	static void ConTuneLock(IConsole::IResult *pResult, void *pUserData);
 	static void ConTuneLockDump(IConsole::IResult *pResult, void *pUserData);
+	static void ConTuneLockReset(IConsole::IResult *pResult, void *pUserData);
 	static void ConTuneLockSetMsgEnter(IConsole::IResult *pResult, void *pUserData);
 	static void ConSwitchOpen(IConsole::IResult* pResult, void* pUserData);
 	static void ConPause(IConsole::IResult* pResult, void* pUserData);	static void ConChangeMap(IConsole::IResult *pResult, void *pUserData);
 	static void ConRestart(IConsole::IResult *pResult, void *pUserData);
+	static void ConServerAlert(IConsole::IResult *pResult, void *pUserData);
+	static void ConModAlert(IConsole::IResult *pResult, void *pUserData);
 	static void ConSay(IConsole::IResult *pResult, void *pUserData);
 	static void ConBroadcast(IConsole::IResult *pResult, void *pUserData);
 	static void ConSetTeam(IConsole::IResult *pResult, void *pUserData);
@@ -220,8 +187,7 @@ public:
 			[pParam](const CLockedTune &Tune) {
 				return str_comp(Tune.m_aParam, pParam) == 0;
 			}); }
-	bool ResetLockedTune(LOCKED_TUNES *pLockedTunings, const char *pParam);
-	bool SetLockedTune(LOCKED_TUNES *pLockedTunings, CLockedTune &Tune);
+	int SetLockedTune(LOCKED_TUNES *pLockedTunings, CLockedTune &Tune, bool AllowGlobalValues = false);
 	void ApplyTuneLock(LOCKED_TUNES *pLockedTunings, int TuneLock);
 	CTuningParams *ApplyLockedTunings(CTuningParams *pTuning, LOCKED_TUNES &LockedTunings);
 
@@ -232,6 +198,10 @@ public:
 
 	CEventHandler m_Events;
 	class CPlayer *m_apPlayers[MAX_CLIENTS];
+
+	// keep last input to always apply when none is sent
+	CNetObj_PlayerInput m_aLastPlayerInput[MAX_CLIENTS];
+	bool m_aPlayerHasInput[MAX_CLIENTS];
 
 	class IGameController *m_pController;
 	CGameWorld m_World;
@@ -266,12 +236,9 @@ public:
 	int m_VoteClientID;
 	int m_NumVoteOptions;
 	int m_VoteEnforce;
-	char m_aaZoneEnterMsg[NUM_TUNEZONES][256]; // 0 is used for switching from or to area without tunings
-	char m_aaZoneLeaveMsg[NUM_TUNEZONES][256];
-	char m_aaTuneLockMsg[NUM_TUNEZONES][256];
-
-	char m_aDeleteTempfile[128];
-	void DeleteTempfile();
+	char m_aaZoneEnterMsg[TuneZone::NUM][256]; // 0 is used for switching from or to area without tunings
+	char m_aaZoneLeaveMsg[TuneZone::NUM][256];
+	char m_aaTuneLockMsg[TuneZone::NUM][256];
 
 	enum
 	{
@@ -298,6 +265,10 @@ public:
 	void CreateDeath(vec2 Pos, int Who, Mask128 Mask = Mask128());
 	void CreateFinishConfetti(vec2 Pos, Mask128 Mask = Mask128());
 	void CreateSound(vec2 Pos, int Sound, Mask128 Mask = Mask128());
+
+	bool SnapLaserObject(const CSnapContext &Context, int SnapId, const vec2 &To, const vec2 &From, int StartTick, int Owner = -1, int LaserType = -1, int Subtype = -1, int SwitchNumber = -1, int Flags = 0) const;
+	bool SnapPickup(const CSnapContext &Context, int SnapId, const vec2 &Pos, int Type, int SubType = 0, int SwitchNumber = -1, int Flags = 0, int Special = 0, int aExtraIds[4] = { 0 }) const;
+	bool SnapPickupObject(const CSnapContext &Context, int SnapId, const vec2 &Pos, int Type, int SubType = 0, int SwitchNumber = -1, int Flags = 0) const;
 
 	enum
 	{
@@ -341,6 +312,9 @@ public:
 	void SendSettings(int ClientID);
 	void SendSkinChange(CTeeInfo TeeInfos, int ClientID, int TargetID);
 
+	void SendServerAlert(const char *pMessage);
+	void SendModeratorAlert(const char *pMessage, int ToClientId);
+
 	// DDRace
 	void SendTeamChange(int ClientID, int Team, bool Silent, int CooldownTick, int ToClientID);
 
@@ -369,7 +343,6 @@ public:
 	// engine events
 	void OnInit() override;
 	void OnConsoleInit() override;
-	void OnMapChange(char* pNewMapName, int MapNameSize) override;
 	void OnShutdown(bool FullShutdown = false) override;
 	void OnPreShutdown() override;
 
@@ -391,6 +364,8 @@ public:
 	void OnClientPredictedInput(int ClientID, void *pInput) override;
 	void OnClientPredictedEarlyInput(int ClientID, void *pInput) override;
 	void OnClientRejoin(int ClientID) override;
+
+	void PreInputClients(int ClientId, bool *pClients) override;
 
 	void OnClientEngineJoin(int ClientID) override;
 	void OnClientEngineDrop(int ClientID, const char *pReason) override;
@@ -438,262 +413,17 @@ public:
 
 	void UpdateHidePlayers(int UpdateID = -1);
 
-	// draweditor preset list
-	static int LoadPresetListCallback(const char *pName, int IsDir, int StorageType, void *pUser);
-	std::vector<std::string> m_vPresetList;
+	CPlots m_Plots;
+	CAccounts m_Accounts;
 
-	// plots
-	void ReadPlotStats(int ID);
-	void WritePlotStats(int ID);
-	std::vector<CEntity *> ReadPlotObjects(const char *pLine, int PlotID);
-	void WritePlotObject(CEntity *pEntity, std::ofstream *pFile, vec2 *pPos = 0);
-
-	void SetPlotInfo(int PlotID, int AccID);
-	void SetPlotExpire(int PlotID);
-
-	int GetMaxPlotSpeedups(int PlotID);
-	int GetMaxPlotTeleporters(int PlotID);
-	unsigned int GetMaxPlotObjects(int PlotID);
-	const char *GetPlotSizeString(int PlotID);
-
+	const char *GetDate(time_t Time, bool ShowTime = true);
 	void SetExpireDateDays(time_t *pDate, float Days);
 	void SetExpireDate(time_t *pDate, float Hours, bool SetMinutesZero = false);
 	bool IsExpired(time_t Date);
-	float MonthsPassedSinceRegister(int AccID);
-
-	struct SPlot
-	{
-		char m_aOwner[32];
-		char m_aDisplayName[32];
-		time_t m_ExpireDate;
-
-		int m_Size;
-		vec2 m_ToTele;
-		std::vector<CEntity *> m_vObjects;
-		int64 m_DestroyEndTick;
-		int m_DoorHealth;
-	} m_aPlots[MAX_PLOTS];
-
-	enum PlotVariables
-	{
-		PLOT_OWNER_ACC_USERNAME,
-		PLOT_DISPLAY_NAME,
-		PLOT_EXPIRE_DATE,
-		PLOT_DOOR_STATUS,
-		PLOT_OBJECTS,
-		NUM_PLOT_VARIABLES
-	};
-
-	void SetPlotDoorStatus(int PlotID, bool Close);
-	void SetPlotDrawDoorStatus(int PlotID, int Door, bool Close);
-	void SetPlotDrawDoorStatus(int Number, bool Close);
-	void ClearPlot(int PlotID);
-	int GetPlotID(int AccID);
-	void ExpirePlots();
-	int GetTilePlotID(vec2 Pos, bool CheckDoor = false);
 
 	int m_FullHourOffsetTicks;
 	bool IsFullHour() { return Server()->Tick() % (Server()->TickSpeed() * 60 * 60) == m_FullHourOffsetTicks; }
-	bool HasPlotByIP(int ClientID);
-
 	int IntersectedLineDoor(vec2 Pos0, vec2 Pos1, int Team, bool PlotDoorOnly, bool ClosedOnly = true);
-	void RemovePortalsFromPlot(int PlotID);
-	bool IsPlotEmpty(int PlotID);
-
-	bool PlotCanBeRaided(int PlotID);
-	bool PlotDoorDestroyed(int PlotID);
-	bool OnPlotDoorTaser(int PlotID, int TaserStrength, int ClientID, vec2 Pos);
-
-	//account
-	int GetAccIDByUsername(const char *pUsername);
-	int GetAccount(const char *pUsername);
-	void FreeAccount(int ID);
-	bool IsAccLoggedInThisPort(int ID);
-
-	// acc saved design
-	void UpdateDesignList(int ID, const char *pMapDesign);
-	const char *GetCurrentDesignFromList(int ID);
-	struct SSavedDesignEntry
-	{
-		char m_aMapName[128];
-		char m_aDesign[64];
-	};
-	std::vector<SSavedDesignEntry> GetDesignList(int ID);
-
-	const char *GetAccVarName(int VariableID);
-	const char *GetAccVarValue(int ID, int VariableID);
-	void SetAccVar(int ID, int VariableID, const char *pData);
-
-	struct TopAccounts
-	{
-		char m_aUsername[32];
-		char m_aAccountName[32];
-		int m_Level;
-		int m_Points;
-		int64 m_Money;
-		int m_KillStreak;
-		int m_PortalBattery;
-		int m_PortalBlocker;
-		int m_DurakWins;
-		int m_DurakProfit;
-	};
-	std::vector<TopAccounts> m_TopAccounts;
-	void SetTopAccStats(int FromID);
-	void LazySaveTopAccounts();
-	bool LazyLoadTopAccounts(int Type);
-	void SaveCurrentTopAccounts();
-
-	int m_LogoutAccountsPort;
-	static int InitAccounts(const char* pName, int IsDir, int StorageType, void* pUser);
-	int AddAccount();
-	void ReadAccountStats(int ID, const char* pName);
-	void WriteAccountStats(int ID);
-	void Logout(int ID, bool Silent = false);
-	void LogoutAllAccounts();
-	bool Login(int ClientID, const char *pUsername, const char *pPassword, bool PasswordRequired = true, bool ForceDesignLoad = false);
-	SHA256_DIGEST HashPassword(const char *pPassword);
-	void SetPassword(int ID, const char *pPassword);
-	bool CheckPassword(int ID, const char *pPassword);
-
-	int m_aTaserPrice[NUM_TASER_LEVELS];
-	int m_aPoliceLevel[NUM_POLICE_LEVELS];
-	int64 m_aNeededXP[DIFFERENCE_XP_END];
-	int64 GetNeededXP(int Level);
-	int m_LastDataSaveTick;
-
-	const char *GetDate(time_t Time, bool ShowTime = true);
-	void WriteDonationFile(int Type, float Amount, int ID, const char *pDescription);
-
-	struct AccountInfo
-	{
-		int m_Port;
-		bool m_LoggedIn;
-		bool m_Disabled;
-		SHA256_DIGEST m_Password;
-		char m_Username[32];
-		int m_ClientID;
-		int m_Level;
-		int64 m_XP;
-		int64 m_Money;
-		int m_Kills;
-		int m_Deaths;
-		int m_PoliceLevel;
-		int m_SurvivalKills;
-		int m_SurvivalWins;
-		bool m_SpookyGhost;
-		char m_aLastMoneyTransaction[5][128];
-		int m_VIP;
-		int m_BlockPoints;
-		int m_InstagibKills;
-		int m_InstagibWins;
-		int m_SpawnWeapon[3];
-		bool m_Ninjajetpack;
-		char m_aLastPlayerName[32];
-		int m_SurvivalDeaths;
-		int m_InstagibDeaths;
-		int m_TaserLevel;
-		int m_KillingSpreeRecord;
-		float m_Euros;
-		time_t m_ExpireDateVIP;
-		int m_PortalRifle;
-		time_t m_ExpireDatePortalRifle;
-		int m_Version;
-		NETADDR m_Addr;
-		NETADDR m_LastAddr;
-		int m_TaserBattery;
-		char m_aContact[128];
-		char m_aTimeoutCode[64];
-		char m_aSecurityPin[5];
-		time_t m_RegisterDate;
-		time_t m_LastLoginDate;
-		int m_Flags;
-		char m_aEmail[128];
-		char m_aDesign[256];
-		int m_PortalBattery;
-		int m_PortalBlocker;
-		int m_VoteMenuFlags;
-		int m_DurakWins;
-		int64 m_DurakProfit;
-		char m_aLanguage[32];
-	};
-	std::vector<AccountInfo> m_Accounts;
-
-	// make sure these are in the same order as the variables above
-	// if you add another variable make sure to change the ACC_CURRENT_VERSION in this file
-	enum AccountVariables
-	{
-		ACC_PORT,
-		ACC_LOGGED_IN,
-		ACC_DISABLED,
-		ACC_PASSWORD,
-		ACC_USERNAME,
-		ACC_CLIENT_ID,
-		ACC_LEVEL,
-		ACC_XP,
-		ACC_MONEY,
-		ACC_KILLS,
-		ACC_DEATHS,
-		ACC_POLICE_LEVEL,
-		ACC_SURVIVAL_KILLS,
-		ACC_SURVIVAL_WINS,
-		ACC_SPOOKY_GHOST,
-		ACC_LAST_MONEY_TRANSACTION_0,
-		ACC_LAST_MONEY_TRANSACTION_1,
-		ACC_LAST_MONEY_TRANSACTION_2,
-		ACC_LAST_MONEY_TRANSACTION_3,
-		ACC_LAST_MONEY_TRANSACTION_4,
-		ACC_VIP,
-		ACC_BLOCK_POINTS,
-		ACC_INSTAGIB_KILLS,
-		ACC_INSTAGIB_WINS,
-		ACC_SPAWN_WEAPON_0,
-		ACC_SPAWN_WEAPON_1,
-		ACC_SPAWN_WEAPON_2,
-		ACC_NINJAJETPACK,
-		ACC_LAST_PLAYER_NAME,
-		ACC_SURVIVAL_DEATHS,
-		ACC_INSTAGIB_DEATHS,
-		ACC_TASER_LEVEL,
-		ACC_KILLING_SPREE_RECORD,
-		ACC_EUROS,
-		ACC_EXPIRE_DATE_VIP,
-		ACC_PORTAL_RIFLE,
-		ACC_EXPIRE_DATE_PORTAL_RIFLE,
-		ACC_VERSION,
-		ACC_ADDR,
-		ACC_LAST_ADDR,
-		ACC_TASER_BATTERY,
-		ACC_CONTACT,
-		ACC_TIMEOUT_CODE,
-		ACC_SECURITY_PIN,
-		ACC_REGISTER_DATE,
-		ACC_LAST_LOGIN_DATE,
-		ACC_FLAGS,
-		ACC_EMAIL,
-		ACC_DESIGN,
-		ACC_PORTAL_BATTERY,
-		ACC_PORTAL_BLOCKER,
-		ACC_VOTE_MENU_FLAGS,
-		ACC_DURAK_WINS,
-		ACC_DURAK_PROFIT,
-		ACC_LANGUAGE,
-		NUM_ACCOUNT_VARIABLES
-	};
-
-	// flags for specific ingame variables that will be saved on logout and loaded on login again
-	enum AccountFlags
-	{
-		ACCFLAG_ZOOMCURSOR = 1<<0,
-		ACCFLAG_PLOTSPAWN = 1<<1,
-		ACCFLAG_SILENTFARM = 1<<2,
-		ACCFLAG_HIDEDRAWINGS = 1<<3,
-		ACCFLAG_RESUMEMOVED = 1<<4,
-		ACCFLAG_HIDEBROADCASTS = 1<<5,
-	};
-
-	// money drops
-	void WriteMoneyListFile();
-	void ReadMoneyListFile();
 
 	//motd
 	const char *FormatMotd(const char *pMsg);
@@ -714,9 +444,10 @@ public:
 	void SendMotd(const char* pMsg, int ClientID);
 
 	const char* GetWeaponName(int Weapon);
-	int GetWeaponType(int Weapon);
-	int GetProjectileType(int Weapon);
-	int GetPickupType(int Type, int Subtype);
+	int GetWeaponType(int Weapon) const;
+	int GetProjectileType(int Weapon) const;
+	int GetPickupType(int Type, int Subtype) const;
+	bool IsValidSpreadWeapon(int Type);
 
 	const char *GetScoreModeName(int ScoreMode);
 	const char *GetScoreModeCommand(int ScoreMode);
@@ -733,6 +464,8 @@ public:
 	class CMinigame *m_pMinigames[NUM_MINIGAMES];
 	CArenas *Arenas() { return ((CArenas *)m_pMinigames[MINIGAME_1VS1]); }
 	CDurak *Durak() { return ((CDurak *)m_pMinigames[MINIGAME_DURAK]); }
+	CSurvival *Survival() { return ((CSurvival *)m_pMinigames[MINIGAME_SURVIVAL]); }
+	CMinigame *BlockMg() { return m_pMinigames[MINIGAME_BLOCK]; }
 	CWhoIs m_WhoIs;
 	CRainbowName m_RainbowName;
 	CVotingMenu m_VotingMenu;
@@ -743,9 +476,6 @@ public:
 
 	void UnsetTelekinesis(CEntity *pEntity);
 	void UnsetKiller(int ClientID);
-
-	bool SameIP(int ClientID1, int ClientID2);
-	bool SameIP(int AccID, const NETADDR *pAddr);
 
 	bool FlagsUsed();
 	void CreateFolders();
@@ -764,37 +494,26 @@ public:
 	const char *FormatURL(const char *pURL);
 	const char *GetAvatarURL(int ClientID);
 
-	void SnapSelectedArea(CSelectedArea *pSelectedArea);
+	void SnapSelectedArea(CSelectedArea *pSelectedArea, const CSnapContext &Context);
 
-	void SendModLogMessage(int ClientID, const char *pMsg) override;
+	enum
+	{
+		MODLOG_ID_SERVER = -2,
+	};
+	void SendModLogMessage(int ClientID, const char *pMsg, bool IsAuth = false) override;
 
 	//pickup drops
 	std::vector<CPickupDrop*> m_vPickupDropLimit;
 
 	// helicopter
-	bool SpawnHelicopter(int Spawner, int Team, vec2 Pos, int TurretType, float Scale = 1.f, bool SpawnOnFloor = true);
+	bool SpawnSpider(int Spawner, int Team, vec2 Pos, float Scale = 1.f, bool SpawnOnFloor = true, int Number = -1);
+	bool SpawnHelicopter(int Spawner, int Team, vec2 Pos, int HelicopterType, int TurretType, float Scale = 1.f, bool SpawnOnFloor = true, int Number = -1);
+	int GetHelicopterTileType() { return Config()->m_SvHeliTileType == NUM_HELICOPTER_TYPES ? random_int(HELICOPTER_DEFAULT, NUM_HELICOPTER_TYPES - 1) : Config()->m_SvHeliTileType; }
 
 	//minigames disabled
 	bool m_aMinigameDisabled[NUM_MINIGAMES];
 
 	void SetMinigame(int ClientID, int Minigame, bool Force = false, bool DoChatMsg = true);
-
-	//survival
-	void SurvivalTick();
-	void SetPlayerSurvivalState(int State);
-	template<typename... Args>
-	void SendSurvivalBroadcastFormat(bool Sound, bool IsImportant, const char *pFormat, Args&&... args)
-	{
-		CFormatArg aArgs[] = { CFormatArg(std::forward<Args>(args))... };
-		SendSurvivalBroadcast(pFormat, Sound, IsImportant, aArgs, std::size(aArgs));
-	}
-	void SendSurvivalBroadcast(const char* pMsg, bool Sound = false, bool IsImportant = true, CFormatArg *pArgs = 0, int NumArgs = 0);
-	int CountSurvivalPlayers(int State);
-	int GetRandomSurvivalPlayer(int State, int NotThis = -1);
-	int m_SurvivalBackgroundState;
-	int m_SurvivalGameState;
-	int64 m_SurvivalTick;
-	int m_SurvivalWinner;
 
 	//instagib
 	void InstagibTick(int Type);
@@ -817,7 +536,7 @@ public:
 		SendChat(-1, CHAT_POLICE_CHANNEL, -1, pFormat, -1, CHATFLAG_ALL, aArgs, std::size(aArgs));
 	}
 	void SendChatPolice(const char *pMessage);
-	bool JailPlayer(int ClientID, int Seconds);
+	bool JailPlayer(int ClientID, int Seconds, int ModLogID = -1);
 	bool ForceJailRelease(int ClientID);
 
 	// gangster
@@ -827,7 +546,7 @@ public:
 	// saved
 	int SaveCharacter(int ClientID, int Flags = 0, float Hours = -1);
 	int FindSavedPlayer(int ClientID);
-	bool CheckLoadPlayer(int ClientID);
+	bool CheckLoadPlayer(int ClientID, bool Force = false);
 	bool TryLoadPlayer(int ClientID, int Index, bool RedirectTile);
 	const char *GetSavedIdentityHash(SSavedIdentity Info);
 	std::vector<SSavedIdentity> m_vSavedIdentities;
@@ -844,8 +563,8 @@ public:
 	void OnRedirectSaveTeeAdd(const char *pHash) override;
 	void OnRedirectSaveTeeRemove(const char *pHash) override;
 	int GetIdentityIndexByHash(const char *pHash);
-	int GetRediretListPort(int WantedSwitchNumber);
-	int GetRediretListSwitch(int WantedPort);
+	int GetRedirectListPort(int WantedSwitchNumber);
+	int GetRedirectListSwitch(int WantedPort);
 
 	void OnPlayerCountUpdate(int Port, int PlayerCount) override;
 	void SendPlayerCountUpdate(bool Shutdown = false);
@@ -988,7 +707,6 @@ private:
 	static void ConStats(IConsole::IResult* pResult, void* pUserData);
 	static void ConAccount(IConsole::IResult* pResult, void* pUserData);
 
-	void SendTop5AccMessage(IConsole::IResult* pResult, void* pUserData, int Type);
 	static void ConTop5Level(IConsole::IResult* pResult, void* pUserData);
 	static void ConTop5Points(IConsole::IResult* pResult, void* pUserData);
 	static void ConTop5Money(IConsole::IResult* pResult, void* pUserData);
@@ -1018,6 +736,9 @@ private:
 	static void ConPlot(IConsole::IResult* pResult, void* pUserData);
 	static void ConHideDrawings(IConsole::IResult* pResult, void* pUserData);
 	static void ConHideBroadcasts(IConsole::IResult* pResult, void* pUserData);
+	static void ConAntiPing(IConsole::IResult* pResult, void* pUserData);
+	static void ConHighBandwidth(IConsole::IResult* pResult, void* pUserData);
+	static void ConSaveSession(IConsole::IResult* pResult, void* pUserData);
 
 	//rcon
 	static void ConFreezeHammer(IConsole::IResult* pResult, void* pUserData);
@@ -1064,6 +785,8 @@ private:
 	static void ConSound(IConsole::IResult* pResult, void* pUserData);
 	static void ConLaserText(IConsole::IResult* pResult, void* pUserData);
 	static void ConSendMotd(IConsole::IResult* pResult, void* pUserData);
+	static void ConSpider(IConsole::IResult* pResult, void* pUserData);
+	static void ConRemoveSpiders(IConsole::IResult* pResult, void* pUserData);
 	static void ConHelicopter(IConsole::IResult* pResult, void* pUserData);
 	static void ConRemoveHelicopters(IConsole::IResult* pResult, void* pUserData);
 	static void ConSnake(IConsole::IResult* pResult, void* pUserData);
@@ -1072,6 +795,8 @@ private:
 	static void ConForceTransformHuman(IConsole::IResult* pResult, void* pUserData);
 	static void ConSetDoubleXpLifes(IConsole::IResult* pResult, void* pUserData);
 	static void ConSetTaserShield(IConsole::IResult* pResult, void* pUserData);
+	static void ConSetSafeArea(IConsole::IResult* pResult, void* pUserData);
+	static void ConUnsetSafeArea(IConsole::IResult* pResult, void* pUserData);
 
 	static void ConConnectDummy(IConsole::IResult* pResult, void* pUserData);
 	static void ConDisconnectDummy(IConsole::IResult* pResult, void* pUserData);
@@ -1120,6 +845,7 @@ private:
 	static void ConTeleGrenade(IConsole::IResult* pResult, void* pUserData);
 	static void ConTeleLaser(IConsole::IResult* pResult, void* pUserData);
 
+	static void ConProjectileHammer(IConsole::IResult* pResult, void* pUserData);
 	static void ConDoorHammer(IConsole::IResult* pResult, void* pUserData);
 	static void ConLovely(IConsole::IResult* pResult, void* pUserData);
 	static void ConRotatingBall(IConsole::IResult* pResult, void* pUserData);
@@ -1163,6 +889,9 @@ private:
 	static void ConWhitelistAdd(IConsole::IResult* pResult, void* pUserData);
 	static void ConWhitelistRemove(IConsole::IResult* pResult, void* pUserData);
 	static void ConWhitelist(IConsole::IResult* pResult, void* pUserData);
+	static void ConWhitelistSave(IConsole::IResult* pResult, void* pUserData);
+	static void ConWhitelistUpdateServers(IConsole::IResult* pResult, void* pUserData);
+	static void ConBansUpdateServers(IConsole::IResult* pResult, void* pUserData);
 
 	static void ConBotLookup(IConsole::IResult* pResult, void* pUserData);
 
@@ -1185,9 +914,6 @@ private:
 	{
 		MAX_MUTES = 256,
 		MAX_VOTE_MUTES = 64,
-
-		MAX_ACC_SYS_BANS = 512,
-		ACC_SYS_BAN_DELAY = 60 * 60 * 6, // 6 hours
 	};
 	struct CMute
 	{
@@ -1214,29 +940,6 @@ private:
 
 	const char *GetWhisper(char *pStr, int *pTarget);
 	bool IsVersionBanned(int Version);
-
-	struct CAccountSystemBan
-	{
-		NETADDR m_Addr;
-		int m_Expire;
-		int m_NumRegistrations;
-		int m_NumFailedLogins;
-		int m_NumFailedPins;
-		int64 m_LastAttempt;
-	};
-
-	enum
-	{
-		ACC_SYS_REGISTER,
-		ACC_SYS_LOGIN,
-		ACC_SYS_PIN,
-	};
-
-	CAccountSystemBan m_aAccountSystemBans[MAX_ACC_SYS_BANS];
-	int m_NumAccountSystemBans;
-	int ProcessAccountSystemBan(int ClientID, int Type);
-	bool TryAccountSystemBan(const NETADDR *pAddr, int Type, int Secs);
-	bool IsAccountSystemBanned(int ClientID, bool ChatMsg = false);
 
 	void FDDraceInitPreMapInit();
 	void FDDraceInit();

@@ -506,6 +506,21 @@ void CGameTeams::SendTeamsState(int ClientID)
 			}
 		}
 
+		const int SafeAreaTeam = 63;
+
+		// in game / save area
+		int ID = i;
+		bool Translated = false;
+		if (Server()->ReverseTranslate(ID, ClientID))
+		{
+			Translated = true;
+			if (!m_Core.GetInGame(ID))
+			{
+				Msg.AddInt(SafeAreaTeam);
+				continue;
+			}
+		}
+
 		// Rainbow name
 		int Color = m_pGameContext->m_RainbowName.GetColor(ClientID, i);
 		if (Color != -1)
@@ -514,7 +529,8 @@ void CGameTeams::SendTeamsState(int ClientID)
 
 			// If color is >= 56 we simply use the previous color, so that the spectate menu won't change order all the time.
 			bool IsSpec = LegacyTeams && Team >= 56 && Team < VANILLA_MAX_CLIENTS && (GameServer()->m_apPlayers[ClientID]->GetTeam() == TEAM_SPECTATORS || GameServer()->m_apPlayers[ClientID]->IsPaused());
-			if (Team == -2 || IsSpec) // TEAM_SUPER
+			bool IsSafeAreaTeam = LegacyTeams && Team == SafeAreaTeam; // if player is in safe area and someone who isnt has rainbowname prevent blink
+			if (Team == -2 || IsSpec || IsSafeAreaTeam) // TEAM_SUPER
 			{
 				// keep the previous color
 				Team = s_aLegacyTeams[Color - 1];
@@ -526,11 +542,14 @@ void CGameTeams::SendTeamsState(int ClientID)
 
 		// Else -> Normal teams
 		int Team = 0;
-		int ID = i;
-		if (Server()->ReverseTranslate(ID, ClientID))
+		if (Translated)
 		{
 			Team = m_Core.Team(ID);
-			if (Team == TEAM_SUPER)
+			// If player is not reserved, dont highlight his team. Causes mismatch between dummy and main when playermapping is active.
+			bool DontHighlightTeam = !GameServer()->m_World.ReserveTeamSlots(Team, ClientID);
+			if(DontHighlightTeam)
+				Team = 0;
+			else if (Team == TEAM_SUPER)
 				Team = VANILLA_MAX_CLIENTS;
 			else if (Team > VANILLA_MAX_CLIENTS)
 				Team = 0;
@@ -647,7 +666,7 @@ void CGameTeams::OnFinish(CPlayer* Player, float Time, const char *pTimestamp)
 	else
 		GameServer()->SendChat(-1, CHAT_ALL, -1, aBuf);
 
-	float Diff = fabs(Time - pData->m_BestTime);
+	float Diff = absolute(Time - pData->m_BestTime);
 
 	if (Time - pData->m_BestTime < 0)
 	{

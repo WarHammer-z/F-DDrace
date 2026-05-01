@@ -32,6 +32,8 @@ enum
 	SAVE_IDENTITY = 1<<2, // saves the identity of a player aswell as logs him back in when this save gets loaded
 	SAVE_JAIL = 1<<3, // only saves and loads escape and jail time of a player
 	SAVE_REDIRECT = 1<<4, // saves tee to redirect folder so other server can load it and adjust the position to the TO tile, requires SAVE_IDENTITY
+	SAVE_SHUTDOWN = 1<<5,
+	SAVE_DISCONNECT = 1<<6, // for freeze on reload
 };
 
 class CSaveTee
@@ -173,6 +175,11 @@ private:
 	int m_IsDoubleXp;
 	std::vector< std::pair<int, int> > m_vCheckpoints;
 	int m_BirthdayGiftTicksLeft;
+	int m_InSafeArea;
+	int m_HasTeleGun;
+	int m_HasTeleGrenade;
+	int m_HasTeleLaser;
+	int m_ProjectileHammer;
 
 	// core
 	int m_MoveRestrictionExtraRoomKey;
@@ -194,6 +201,10 @@ private:
 	int m_IsBirthdayGift;
 	int m_TaserShield;
 	int m_DoubleXpLifesLeft;
+	int m_SavePlayerDisconnect;
+	int m_HighBandwidth;
+	int m_AntiPing;
+	int m_HasProjectileHammer;
 
 	SSavedIdentity m_Identity;
 };

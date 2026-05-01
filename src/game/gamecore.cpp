@@ -298,7 +298,8 @@ void CCharacterCore::Tick(bool UseInput)
 				}
 			}
 
-			if (m_pCollision->m_pConfig->m_SvFlagHooking && !m_FightStarted)
+			if (m_pCollision->m_pConfig->m_SvFlagHooking && !m_FightStarted && m_Id != -1 && m_pTeams->GetInGame(m_Id) &&
+				(m_pCollision->m_pConfig->m_SvFlagHooking != 2 || (m_Id != -1 && !m_pTeams->GetSolo(m_Id))))
 			{
 				for (int i = 0; i < 2; i++)
 				{
@@ -569,7 +570,15 @@ void CCharacterCore::Move(bool BugStoppersPassthrough)
 	vec2 NewPos = m_Pos;
 
 	vec2 OldVel = m_Vel;
-	m_pCollision->MoveBox(m_pfnSwitchActive, m_pSwitchActiveUser, &NewPos, &m_Vel, vec2(PHYS_SIZE, PHYS_SIZE), m_Tuning.m_Elasticity, !BugStoppersPassthrough, m_MoveRestrictionExtra);
+	bool Grounded = false;
+	m_pCollision->MoveBox(m_pfnSwitchActive, m_pSwitchActiveUser, &NewPos, &m_Vel, vec2(PHYS_SIZE, PHYS_SIZE),
+			vec2(m_Tuning.m_GroundElasticityX, m_Tuning.m_GroundElasticityY), !BugStoppersPassthrough, m_MoveRestrictionExtra, &Grounded);
+
+	if(Grounded)
+	{
+		m_Jumped &= ~2;
+		m_JumpedTotal = 0;
+	}
 
 	m_Colliding = 0;
 	if (m_Vel.x < 0.001f && m_Vel.x > -0.001f)
@@ -599,14 +608,19 @@ void CCharacterCore::Move(bool BugStoppersPassthrough)
 				CCharacterCore *pCharCore = m_pWorld->m_apCharacters[p];
 				if(!pCharCore || pCharCore == this || (!pCharCore->m_Collision || (m_Id != -1 && !m_pTeams->CanCollide(m_Id, p))))
 					continue;
-				float D = distance_squared(Pos, pCharCore->m_Pos);
-				if(D < PHYS_SIZE*PHYS_SIZE && D >= 0.0f)
+				
+				float DS = distance_squared(Pos, pCharCore->m_Pos);
+				if(DS < PHYS_SIZE*PHYS_SIZE)
 				{
-					if(a > 0.0f)
-						m_Pos = LastPos;
-					else if(distance_squared(NewPos, pCharCore->m_Pos) > D)
-						m_Pos = NewPos;
-					return;
+					float D = distance(Pos, pCharCore->m_Pos);
+					if(D < PHYS_SIZE && D >= 0.0f)
+					{
+						if(a > 0.0f)
+							m_Pos = LastPos;
+						else if(distance(NewPos, pCharCore->m_Pos) > D)
+							m_Pos = NewPos;
+						return;
+					}
 				}
 			}
 			LastPos = Pos;

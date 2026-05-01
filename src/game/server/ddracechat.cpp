@@ -19,16 +19,17 @@ void CGameContext::ConCredits(IConsole::IResult *pResult, void *pUserData)
 	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientID];
 	if (!pPlayer)
 		return;
-	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "credits",
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "credits",
 		pPlayer->Localize("F-DDrace is a mod by fokkonaut"));
-	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "credits",
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "credits",
 		pPlayer->Localize("This mod is based on Teeworlds 0.7 and also incorporates features, ideas, and partial implementations"));
-	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "credits",
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "credits",
 		pPlayer->Localize("from DDNet++ by ChillerDragon, DDNet, and other community projects, aswell as many custom features!"));
-	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "credits",
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "credits",
 		pPlayer->Localize("If you want to check out the code or contribute, feel free to check out F-DDrace on GitHub:"));
-	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "credits",
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "credits",
 		"https://github.com/fokkonaut/F-DDrace");
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "credits", pPlayer->Localize("English translation by the developers"));
 }
 
 void CGameContext::ConInfo(IConsole::IResult *pResult, void *pUserData)
@@ -37,15 +38,15 @@ void CGameContext::ConInfo(IConsole::IResult *pResult, void *pUserData)
 	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientID];
 	if (!pPlayer)
 		return;
-	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "info", "F-DDrace Mod. Version: " GAME_VERSION ", by fokkonaut");
-	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "info", "Source: https://github.com/fokkonaut/F-DDrace");
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "info", "F-DDrace Mod. Version: " GAME_VERSION ", by fokkonaut");
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "info", "Source: https://github.com/fokkonaut/F-DDrace");
 	if(GIT_SHORTREV_HASH)
 	{
 		char aBuf[64];
 		str_format(aBuf, sizeof(aBuf), "Git revision hash: %s", GIT_SHORTREV_HASH);
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "info", aBuf);
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "info", aBuf);
 	}
-	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "info", pPlayer->Localize("For more info, say '/cmdlist' or '/credits'"));
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "info", pPlayer->Localize("For more info, say '/cmdlist' or '/credits'"));
 }
 
 void CGameContext::ConList(IConsole::IResult *pResult, void *pUserData)
@@ -69,11 +70,11 @@ void CGameContext::ConHelp(IConsole::IResult *pResult, void *pUserData)
 		return;
 	if (pResult->NumArguments() == 0)
 	{
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "help",
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "help",
 				pPlayer->Localize("/cmdlist will show a list of all chat commands"));
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "help",
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "help",
 				pPlayer->Localize("/help + any command will show you the help for this command"));
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "help",
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "help",
 				pPlayer->Localize("Example /help settings will display the help about /settings"));
 	}
 	else
@@ -87,15 +88,15 @@ void CGameContext::ConHelp(IConsole::IResult *pResult, void *pUserData)
 			{
 				char aBuf[256];
 				str_format(aBuf, sizeof(aBuf), "%s: %s %s", pPlayer->Localize("Usage"), pCmdInfo->m_pName, pCmdInfo->m_pParams);
-				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "help", aBuf);
+				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "help", aBuf);
 			}
 
 			if (pCmdInfo->m_pHelp)
-				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "help", pCmdInfo->m_pHelp);
+				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "help", pCmdInfo->m_pHelp);
 		}
 		else
 			pSelf->Console()->Print(
-					IConsole::OUTPUT_LEVEL_STANDARD,
+					IConsole::OUTPUT_LEVEL_RESPONSE,
 					"help",
 					pPlayer->Localize("Command is either unknown or you have given a blank command without any parameters."));
 	}
@@ -110,11 +111,11 @@ void CGameContext::ConSettings(IConsole::IResult *pResult, void *pUserData)
 
 	if (pResult->NumArguments() == 0)
 	{
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 				pPlayer->Localize("to check a server setting say /settings and setting's name, setting names are:"));
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 				"teams, collision, hooking, endlesshooking, me, ");
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 				"hitting, oldlaser, timeout, votes, pause and scores");
 	}
 	else
@@ -130,50 +131,51 @@ void CGameContext::ConSettings(IConsole::IResult *pResult, void *pUserData)
 			str_format(aBuf, sizeof(aBuf), "%s %s",
 				pSelf->Config()->m_SvTeam == 1 ?
 							"Teams are available on this server" :
+							pSelf->Config()->m_SvTeam == 4 ? "Teams are only available in '/block' minigame on this server" :
 							(pSelf->Config()->m_SvTeam == 0 || pSelf->Config()->m_SvTeam == 3) ?
 									"Teams are not available on this server" :
 									"You have to be in a team to play on this server", /*pSelf->Config()->m_SvTeamStrict ? "and if you die in a team all of you die" : */
 									"and all of your team will die if the team is locked");
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings", aBuf);
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings", aBuf);
 		}
 		else if (str_comp(pArg, "collision") == 0)
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 				ColTemp ?
 						"Players can collide on this server" :
 						"Players can't collide on this server");
 		}
 		else if (str_comp(pArg, "hooking") == 0)
 		{
-			pSelf->Console()->Print( IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+			pSelf->Console()->Print( IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 				HookTemp ?
 						"Players can hook each other on this server" :
 						"Players can't hook each other on this server");
 		}
 		else if (str_comp(pArg, "endlesshooking") == 0)
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 				pSelf->Config()->m_SvEndlessDrag ?
 						"Players hook time is unlimited" :
 						"Players hook time is limited");
 		}
 		else if (str_comp(pArg, "hitting") == 0)
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 				pSelf->Config()->m_SvHit ?
 						"Players weapons affect others" :
 						"Players weapons has no affect on others");
 		}
 		else if (str_comp(pArg, "oldlaser") == 0)
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 				pSelf->Config()->m_SvOldLaser ?
 						"Lasers can hit you if you shot them and they pull you towards the bounce origin (Like DDRace Beta)" :
 						"Lasers can't hit you if you shot them, and they pull others towards the shooter");
 		}
 		else if (str_comp(pArg, "me") == 0)
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 				pSelf->Config()->m_SvSlashMe ?
 						"Players can use /me commands the famous IRC Command" :
 						"Players can't use the /me command");
@@ -181,11 +183,11 @@ void CGameContext::ConSettings(IConsole::IResult *pResult, void *pUserData)
 		else if (str_comp(pArg, "timeout") == 0)
 		{
 			str_format(aBuf, sizeof(aBuf), "The Server Timeout is currently set to %d seconds", pSelf->Config()->m_ConnTimeout);
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings", aBuf);
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings", aBuf);
 		}
 		else if (str_comp(pArg, "votes") == 0)
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 				pSelf->Config()->m_SvVoteKick ?
 						"Players can use Callvote menu tab to kick offenders" :
 						"Players can't use the Callvote menu tab to kick offenders");
@@ -194,7 +196,7 @@ void CGameContext::ConSettings(IConsole::IResult *pResult, void *pUserData)
 				str_format(aBuf, sizeof(aBuf),
 						"Players are banned for %d minute(s) if they get voted off", pSelf->Config()->m_SvVoteKickBantime);
 
-				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 					pSelf->Config()->m_SvVoteKickBantime ?
 								aBuf :
 								"Players are just kicked and not banned if they get voted off");
@@ -202,21 +204,21 @@ void CGameContext::ConSettings(IConsole::IResult *pResult, void *pUserData)
 		}
 		else if (str_comp(pArg, "pause") == 0)
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 				pSelf->Config()->m_SvPauseable ?
 						"/spec will pause you and your tee will vanish" :
 						"/spec will pause you but your tee will not vanish");
 		}
 		else if (str_comp(pArg, "scores") == 0)
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 				pSelf->Config()->m_SvHideScore ?
 						"Scores are private on this server" :
 						"Scores are public on this server");
 		}
 		else
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "settings",
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "settings",
 			"no matching settings found, type /settings to view them");
 		}
 	}
@@ -233,7 +235,7 @@ void ToggleSpecPause(IConsole::IResult *pResult, void *pUserData, int PauseType)
 	if(!pPlayer)
 		return;
 
-	if (pPlayer->m_Minigame == MINIGAME_SURVIVAL && pPlayer->m_SurvivalState > SURVIVAL_LOBBY && pPlayer->GetTeam() != TEAM_SPECTATORS && !pPlayer->IsPaused())
+	if (pPlayer->m_Minigame == MINIGAME_SURVIVAL && pSelf->Survival()->IsPlaying(pResult->m_ClientID) && pPlayer->GetTeam() != TEAM_SPECTATORS && !pPlayer->IsPaused())
 	{
 		pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("You can't join the spectators while you are in survival"));
 		return;
@@ -244,7 +246,7 @@ void ToggleSpecPause(IConsole::IResult *pResult, void *pUserData, int PauseType)
 	{
 		char aBuf[128];
 		str_format(aBuf, sizeof(aBuf), "You are force-paused for %d seconds.", (PauseState - pServ->Tick()) / pServ->TickSpeed());
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "spec", aBuf);
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "spec", aBuf);
 	}
 	else if(pResult->NumArguments() > 0)
 	{
@@ -278,7 +280,7 @@ void ToggleSpecPauseVoted(IConsole::IResult *pResult, void *pUserData, int Pause
 	if(!pPlayer)
 		return;
 
-	if (pPlayer->m_Minigame == MINIGAME_SURVIVAL && pPlayer->m_SurvivalState > SURVIVAL_LOBBY && pPlayer->GetTeam() != TEAM_SPECTATORS && !pPlayer->IsPaused())
+	if (pPlayer->m_Minigame == MINIGAME_SURVIVAL && pSelf->Survival()->IsPlaying(pResult->m_ClientID) && pPlayer->GetTeam() != TEAM_SPECTATORS && !pPlayer->IsPaused())
 	{
 		pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("You can't join the spectators while you are in survival"));
 		return;
@@ -290,7 +292,7 @@ void ToggleSpecPauseVoted(IConsole::IResult *pResult, void *pUserData, int Pause
 		IServer* pServ = pSelf->Server();
 		char aBuf[128];
 		str_format(aBuf, sizeof(aBuf), "You are force-paused for %d seconds.", (PauseState - pServ->Tick()) / pServ->TickSpeed());
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "spec", aBuf);
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "spec", aBuf);
 		return;
 	}
 
@@ -344,7 +346,7 @@ void CGameContext::ConTeamTop5(IConsole::IResult *pResult, void *pUserData)
 
 	if (pSelf->Config()->m_SvHideScore)
 	{
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "teamtop5",
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "teamtop5",
 				"Showing the team top 5 is not allowed on this server.");
 		return;
 	}
@@ -369,7 +371,7 @@ void CGameContext::ConTop5(IConsole::IResult *pResult, void *pUserData)
 
 	if (pSelf->Config()->m_SvHideScore)
 	{
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "top5",
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "top5",
 				"Showing the top 5 is not allowed on this server.");
 		return;
 	}
@@ -389,14 +391,14 @@ void CGameContext::ConMap(IConsole::IResult *pResult, void *pUserData)
 
 	if (pSelf->Config()->m_SvMapVote == 0)
 	{
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "map",
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "map",
 				"/map is disabled");
 		return;
 	}
 
 	if (pResult->NumArguments() <= 0)
 	{
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "map", "Example: /map adr3 to call vote for Adrenaline 3. This means that the map name must start with 'a' and contain the characters 'd', 'r' and '3' in that order");
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "map", "Example: /map adr3 to call vote for Adrenaline 3. This means that the map name must start with 'a' and contain the characters 'd', 'r' and '3' in that order");
 		return;
 	}
 
@@ -447,7 +449,7 @@ void CGameContext::ConPractice(IConsole::IResult *pResult, void *pUserData)
 	if(!pSelf->Config()->m_SvPractice)
 	{
 		pSelf->Console()->Print(
-				IConsole::OUTPUT_LEVEL_STANDARD,
+				IConsole::OUTPUT_LEVEL_RESPONSE,
 				"print",
 				"Practice mode is disabled");
 		return;
@@ -460,7 +462,7 @@ void CGameContext::ConPractice(IConsole::IResult *pResult, void *pUserData)
 	if(Team <= TEAM_FLOCK || Team >= TEAM_SUPER)
 	{
 		pSelf->Console()->Print(
-				IConsole::OUTPUT_LEVEL_STANDARD,
+				IConsole::OUTPUT_LEVEL_RESPONSE,
 				"print",
 				"Join a team to enable practice mode, which means you can use /r, but can't earn a rank.");
 		return;
@@ -469,7 +471,7 @@ void CGameContext::ConPractice(IConsole::IResult *pResult, void *pUserData)
 	if(Teams.IsPractice(Team))
 	{
 		pSelf->Console()->Print(
-				IConsole::OUTPUT_LEVEL_STANDARD,
+				IConsole::OUTPUT_LEVEL_RESPONSE,
 				"print",
 				"Team is already in practice mode");
 		return;
@@ -665,7 +667,7 @@ void CGameContext::ConTeamRank(IConsole::IResult *pResult, void *pUserData)
 					true);
 		else
 			pSelf->Console()->Print(
-					IConsole::OUTPUT_LEVEL_STANDARD,
+					IConsole::OUTPUT_LEVEL_RESPONSE,
 					"teamrank",
 					"Showing the team rank of other players is not allowed on this server.");
 	else
@@ -693,7 +695,7 @@ void CGameContext::ConRank(IConsole::IResult *pResult, void *pUserData)
 					true);
 		else
 			pSelf->Console()->Print(
-					IConsole::OUTPUT_LEVEL_STANDARD,
+					IConsole::OUTPUT_LEVEL_RESPONSE,
 					"rank",
 					"Showing the rank of other players is not allowed on this server.");
 	else
@@ -710,9 +712,13 @@ void CGameContext::ConLockTeam(IConsole::IResult *pResult, void *pUserData)
 	if (!pPlayer)
 		return;
 
+	// disallow unlocking durak or 1vs1 team
+	if (pSelf->Arenas()->FightStarted(pResult->m_ClientID) || pSelf->Durak()->InDurakGame(pResult->m_ClientID))
+		return;
+
 	if(pSelf->Config()->m_SvTeam == 0 || pSelf->Config()->m_SvTeam == 3)
 	{
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "lock",
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "lock",
 				pPlayer->Localize("Teams are disabled"));
 		return;
 	}
@@ -727,7 +733,7 @@ void CGameContext::ConLockTeam(IConsole::IResult *pResult, void *pUserData)
 	if(Team <= TEAM_FLOCK || Team >= TEAM_SUPER)
 	{
 		pSelf->Console()->Print(
-				IConsole::OUTPUT_LEVEL_STANDARD,
+				IConsole::OUTPUT_LEVEL_RESPONSE,
 				"print",
 				pPlayer->Localize("This team can't be locked"));
 		return;
@@ -741,7 +747,7 @@ void CGameContext::ConLockTeam(IConsole::IResult *pResult, void *pUserData)
 	else if(!pSelf->Config()->m_SvTeamLock)
 	{
 		pSelf->Console()->Print(
-				IConsole::OUTPUT_LEVEL_STANDARD,
+				IConsole::OUTPUT_LEVEL_RESPONSE,
 				"print",
 				pPlayer->Localize("Team locking is disabled on this server"));
 	}
@@ -762,16 +768,20 @@ void CGameContext::ConInviteTeam(IConsole::IResult *pResult, void *pUserData)
 	if (!pPlayer)
 		return;
 
+	// disallow inviting to durak or 1vs1 team
+	if (pSelf->Arenas()->FightStarted(pResult->m_ClientID) || pSelf->Durak()->InDurakGame(pResult->m_ClientID))
+		return;
+
 	if(pSelf->Config()->m_SvTeam == 0 || pSelf->Config()->m_SvTeam == 3)
 	{
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "join",
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "join",
 				pPlayer->Localize("Teams are disabled"));
 		return;
 	}
 
 	if(!pSelf->Config()->m_SvInvite)
 	{
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "invite", pPlayer->Localize("Invites are disabled"));
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "invite", pPlayer->Localize("Invites are disabled"));
 		return;
 	}
 
@@ -790,19 +800,19 @@ void CGameContext::ConInviteTeam(IConsole::IResult *pResult, void *pUserData)
 
 		if(Target < 0)
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "invite", pPlayer->Localize("Player not found"));
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "invite", pPlayer->Localize("Player not found"));
 			return;
 		}
 
 		if(pController->m_Teams.IsInvited(Team, Target))
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "invite", pPlayer->Localize("Player already invited"));
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "invite", pPlayer->Localize("Player already invited"));
 			return;
 		}
 
 		if(pPlayer->m_LastInvited + pSelf->Config()->m_SvInviteFrequency * pSelf->Server()->TickSpeed() > pSelf->Server()->Tick())
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "invite", pPlayer->Localize("Can't invite this quickly"));
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "invite", pPlayer->Localize("Can't invite this quickly"));
 			return;
 		}
 
@@ -816,7 +826,7 @@ void CGameContext::ConInviteTeam(IConsole::IResult *pResult, void *pUserData)
 		pSelf->SendChatTeamFormat(Team, Localizable("'%s' invited '%s' to your team."), pSelf->Server()->ClientName(pResult->m_ClientID), pSelf->Server()->ClientName(Target));
 	}
 	else
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "invite", "Can't invite players to this team");
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "invite", "Can't invite players to this team");
 }
 
 void CGameContext::ConJoinTeam(IConsole::IResult *pResult, void *pUserData)
@@ -833,7 +843,7 @@ void CGameContext::ConJoinTeam(IConsole::IResult *pResult, void *pUserData)
 	if (pSelf->m_VoteCloseTime && pSelf->m_VoteCreator == pResult->m_ClientID && (pSelf->m_VoteKick || pSelf->m_VoteSpec))
 	{
 		pSelf->Console()->Print(
-				IConsole::OUTPUT_LEVEL_STANDARD,
+				IConsole::OUTPUT_LEVEL_RESPONSE,
 				"join",
 				pPlayer->Localize("You are running a vote please try again after the vote is done!"));
 		return;
@@ -841,7 +851,7 @@ void CGameContext::ConJoinTeam(IConsole::IResult *pResult, void *pUserData)
 	else if (pSelf->Config()->m_SvTeam == 2 && pResult->GetInteger(0) == 0 && pPlayer->GetCharacter() && pPlayer->GetCharacter()->m_LastStartWarning < pSelf->Server()->Tick() - 3 * pSelf->Server()->TickSpeed())
 	{
 		pSelf->Console()->Print(
-				IConsole::OUTPUT_LEVEL_STANDARD,
+				IConsole::OUTPUT_LEVEL_RESPONSE,
 				"join",
 				pPlayer->Localize("You must join a team and play with somebody or else you can't play"));
 		pPlayer->GetCharacter()->m_LastStartWarning = pSelf->Server()->Tick();
@@ -851,7 +861,7 @@ void CGameContext::ConJoinTeam(IConsole::IResult *pResult, void *pUserData)
 	{
 		if (pPlayer->GetCharacter() == 0)
 		{
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "join",
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "join",
 					pPlayer->Localize("You can't change teams while you are dead/a spectator."));
 		}
 		else
@@ -863,17 +873,17 @@ void CGameContext::ConJoinTeam(IConsole::IResult *pResult, void *pUserData)
 					* pSelf->Config()->m_SvTeamChangeDelay
 					> pSelf->Server()->Tick())
 			{
-				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "join",
+				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "join",
 						pPlayer->Localize("You can't change teams that fast!"));
 			}
 			else if (pPlayer->IsMinigame() && pPlayer->m_Minigame != MINIGAME_BLOCK && pResult->NumArguments() > 0)
 			{
-				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "join",
+				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "join",
 					pPlayer->Localize("You can't join teams in this minigame"));
 			}
 			else if(Team > 0 && Team < MAX_CLIENTS && pController->m_Teams.TeamLocked(Team) && !pController->m_Teams.IsInvited(Team, pResult->m_ClientID))
 			{
-				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "join",
+				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "join",
 					pSelf->Config()->m_SvInvite ?
 						pPlayer->Localize("This team is locked using /lock. Only members of the team can unlock it using /lock."):
 						pPlayer->Localize("This team is locked using /lock. Only members of the team can invite you or unlock it using /lock."));
@@ -882,11 +892,11 @@ void CGameContext::ConJoinTeam(IConsole::IResult *pResult, void *pUserData)
 			{
 				char aBuf[512];
 				str_format(aBuf, sizeof(aBuf), pPlayer->Localize("This team already has the maximum allowed size of %d players"), pSelf->Config()->m_SvTeamMaxSize);
-				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "join", aBuf);
+				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "join", aBuf);
 			}
-			else if (pSelf->Config()->m_SvTeam == 0 || pSelf->Config()->m_SvTeam == 3)
+			else if (pSelf->Config()->m_SvTeam == 0 || pSelf->Config()->m_SvTeam == 3 || (pSelf->Config()->m_SvTeam == 4 && pPlayer->m_Minigame != MINIGAME_BLOCK))
 			{
-				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "join", pPlayer->Localize("Teams are disabled"));
+				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "join", pPlayer->Localize("Teams are disabled"));
 			}
 			else if(pController->m_Teams.SetCharacterTeam(pPlayer->GetCID(), Team))
 			{
@@ -898,7 +908,7 @@ void CGameContext::ConJoinTeam(IConsole::IResult *pResult, void *pUserData)
 			}
 			else
 			{
-				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "join",
+				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "join",
 						pPlayer->Localize("You cannot join this team at this time"));
 			}
 		}
@@ -909,7 +919,7 @@ void CGameContext::ConJoinTeam(IConsole::IResult *pResult, void *pUserData)
 		if (!pPlayer->IsPlaying())
 		{
 			pSelf->Console()->Print(
-					IConsole::OUTPUT_LEVEL_STANDARD,
+					IConsole::OUTPUT_LEVEL_RESPONSE,
 					"join",
 					pPlayer->Localize("You can't check your team while you are dead/a spectator."));
 		}
@@ -921,7 +931,7 @@ void CGameContext::ConJoinTeam(IConsole::IResult *pResult, void *pUserData)
 					"You are in team %d",
 					((CGameControllerDDRace*) pSelf->m_pController)->m_Teams.m_Core.Team(
 							pResult->m_ClientID));
-			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "join",
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "join",
 					aBuf);
 		}
 	}
@@ -942,7 +952,7 @@ void CGameContext::ConMe(IConsole::IResult *pResult, void *pUserData)
 		pSelf->SendChat(-2, CHAT_ALL, -1, aBuf, pResult->m_ClientID);
 	else
 		pSelf->Console()->Print(
-				IConsole::OUTPUT_LEVEL_STANDARD,
+				IConsole::OUTPUT_LEVEL_RESPONSE,
 				"me",
 				pSelf->m_apPlayers[pResult->m_ClientID]->Localize("/me is disabled on this server"));
 }
@@ -952,7 +962,7 @@ void CGameContext::ConEyeEmote(IConsole::IResult *pResult, void *pUserData)
 	CGameContext *pSelf = (CGameContext *) pUserData;
 	if (pSelf->Config()->m_SvEmotionalTees == -1)
 	{
-		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "emote",
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "emote",
 				"Emotes are disabled.");
 		return;
 	}
@@ -970,11 +980,11 @@ void CGameContext::ConEyeEmote(IConsole::IResult *pResult, void *pUserData)
 	if (pResult->NumArguments() == 0)
 	{
 		pSelf->Console()->Print(
-				IConsole::OUTPUT_LEVEL_STANDARD,
+				IConsole::OUTPUT_LEVEL_RESPONSE,
 				"emote",
 				"Emote commands are: /emote surprise /emote blink /emote close /emote angry /emote happy /emote pain");
 		pSelf->Console()->Print(
-				IConsole::OUTPUT_LEVEL_STANDARD,
+				IConsole::OUTPUT_LEVEL_RESPONSE,
 				"emote",
 				"Example: /emote surprise 10 for 10 seconds or /emote surprise (default 1 second)");
 	}
@@ -998,7 +1008,7 @@ void CGameContext::ConEyeEmote(IConsole::IResult *pResult, void *pUserData)
 			else if (!str_comp(pResult->GetString(0), "normal"))
 				pPlayer->m_DefEmote = EMOTE_NORMAL;
 			else
-				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD,
+				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE,
 						"emote", "Unknown emote... Say /emote");
 
 			int Duration = 1;
@@ -1038,7 +1048,7 @@ void CGameContext::ConShowOthers(IConsole::IResult *pResult, void *pUserData)
 	}
 	else
 		pSelf->Console()->Print(
-				IConsole::OUTPUT_LEVEL_STANDARD,
+				IConsole::OUTPUT_LEVEL_RESPONSE,
 				"showotherschat",
 				"Showing players from other teams is disabled");
 }
@@ -1136,7 +1146,7 @@ void CGameContext::ConSayTime(IConsole::IResult *pResult, void *pUserData)
 			aBufname,
 			((IntTime / 60) > 9) ? "" : "0", IntTime / 60,
 			((IntTime % 60) > 9) ? "" : "0", IntTime % 60);
-	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "time", aBuftime);
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_RESPONSE, "time", aBuftime);
 }
 
 void CGameContext::ConSayTimeAll(IConsole::IResult *pResult, void *pUserData)
@@ -1281,7 +1291,7 @@ void CGameContext::ConAccount(IConsole::IResult* pResult, void* pUserData)
 
 	char aBuf[128];
 	time_t tmp;
-	CGameContext::AccountInfo *pAccount = &pSelf->m_Accounts[pPlayer->GetAccID()];
+	CAccounts::AccountInfo *pAccount = &pSelf->m_Accounts.Get(pPlayer->GetAccID());
 
 	str_format(aBuf, sizeof(aBuf), "--- %s ---", pPlayer->Localize("Account Info"));
 	pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
@@ -1351,7 +1361,7 @@ void CGameContext::ConStats(IConsole::IResult* pResult, void* pUserData)
 
 	char aBuf[128];
 	int Minigame = pSelf->m_apPlayers[pResult->m_ClientID]->m_Minigame;
-	CGameContext::AccountInfo *pAccount = &pSelf->m_Accounts[pPlayer->GetAccID()];
+	CAccounts::AccountInfo *pAccount = &pSelf->m_Accounts.Get(pPlayer->GetAccID());
 
 	// Show durak stats when on seat
 	if (pSelf->Durak()->IsPlayerOnSeat(pResult->m_ClientID))
@@ -1369,7 +1379,7 @@ void CGameContext::ConStats(IConsole::IResult* pResult, void* pUserData)
 			pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
 			str_format(aBuf, sizeof(aBuf), "%s [%d] %s", pAsker->Localize("Level"), pAccount->m_Level, pPlayer->GetAccID() < ACC_START ? pAsker->Localize("(not logged in)") : "");
 			pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
-			str_format(aBuf, sizeof(aBuf), "XP [%lld/%lld]", pAccount->m_XP, pSelf->GetNeededXP(pAccount->m_Level));
+			str_format(aBuf, sizeof(aBuf), "XP [%lld/%lld]", pAccount->m_XP, pSelf->m_Accounts.GetNeededXP(pAccount->m_Level));
 			pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
 			str_format(aBuf, sizeof(aBuf), "%s [%lld]", BankEnabled ? pAsker->Localize("Bank") : pAsker->Localize("Wallet"), pPlayer->GetWalletOrBankDisplay());
 			pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
@@ -1505,6 +1515,8 @@ void CGameContext::ConSpawnWeaponsInfo(IConsole::IResult* pResult, void* pUserDa
 	if (!pPlayer)
 		return;
 
+	CAccounts::AccountInfo *pAccount = &pSelf->m_Accounts.Get(pPlayer->GetAccID());
+
 	char aBuf[256];
 	str_format(aBuf, sizeof(aBuf), "~~~ %s ~~~", pPlayer->Localize("Spawn Weapons"));
 	pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
@@ -1514,11 +1526,11 @@ void CGameContext::ConSpawnWeaponsInfo(IConsole::IResult* pResult, void* pUserDa
 	pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("Each bullet costs 600.000 money."));
 	str_format(aBuf, sizeof(aBuf), "~~~ %s ~~~", pPlayer->Localize("Your Spawn Weapons"));
 	pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
-	str_format(aBuf, sizeof(aBuf), "%s: %d", pPlayer->Localize("Spawn shotgun bullets"), pSelf->m_Accounts[pSelf->m_apPlayers[pResult->m_ClientID]->GetAccID()].m_SpawnWeapon[0]);
+	str_format(aBuf, sizeof(aBuf), "%s: %d", pPlayer->Localize("Spawn shotgun bullets"), pAccount->m_SpawnWeapon[0]);
 	pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
-	str_format(aBuf, sizeof(aBuf), "%s: %d", pPlayer->Localize("Spawn grenade bullets"), pSelf->m_Accounts[pSelf->m_apPlayers[pResult->m_ClientID]->GetAccID()].m_SpawnWeapon[1]);
+	str_format(aBuf, sizeof(aBuf), "%s: %d", pPlayer->Localize("Spawn grenade bullets"), pAccount->m_SpawnWeapon[1]);
 	pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
-	str_format(aBuf, sizeof(aBuf), "%s: %d", pPlayer->Localize("Spawn rifle bullets"), pSelf->m_Accounts[pSelf->m_apPlayers[pResult->m_ClientID]->GetAccID()].m_SpawnWeapon[2]);
+	str_format(aBuf, sizeof(aBuf), "%s: %d", pPlayer->Localize("Spawn rifle bullets"), pAccount->m_SpawnWeapon[2]);
 	pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
 }
 
@@ -1556,7 +1568,7 @@ void CGameContext::ConRegister(IConsole::IResult * pResult, void * pUserData)
 	str_copy(aPassword, pResult->GetString(1), sizeof(aPassword));
 	str_copy(aPassword2, pResult->GetString(2), sizeof(aPassword2));
 
-	if (str_length(aUsername) > 20 || str_length(aUsername) < 3)
+	if (str_length(aUsername) > MAX_USERNAME_LENGTH || str_length(aUsername) < MIN_USERNAME_LENGTH)
 	{
 		pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("The username is too long or too short"));
 		return;
@@ -1580,32 +1592,32 @@ void CGameContext::ConRegister(IConsole::IResult * pResult, void * pUserData)
 		return;
 	}
 
-	int ID = pSelf->AddAccount();
-	pSelf->ReadAccountStats(ID, aUsername);
+	int ID = pSelf->m_Accounts.AddAccount();
+	pSelf->m_Accounts.ReadAccountStats(ID, aUsername);
 
-	if (!str_comp_nocase(pSelf->m_Accounts[ID].m_Username, aUsername))
+	if (!str_comp_nocase(pSelf->m_Accounts.Get(ID).m_Username, aUsername))
 	{
 		pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("Username already exists"));
-		pSelf->FreeAccount(ID);
+		pSelf->m_Accounts.FreeAccount(ID);
 		return;
 	}
 
 	// we reset the account again and read it again to get the correct values
-	pSelf->FreeAccount(ID);
+	pSelf->m_Accounts.FreeAccount(ID);
 
 	// process register spam protection before really adding the account
-	if (pSelf->ProcessAccountSystemBan(pResult->m_ClientID, ACC_SYS_REGISTER))
+	if (pSelf->m_Accounts.ProcessAccountSystemBan(pResult->m_ClientID, CAccounts::ACC_SYS_REGISTER))
 		return;
 
-	ID = pSelf->AddAccount();
+	ID = pSelf->m_Accounts.AddAccount();
 
-	pSelf->SetPassword(ID, aPassword);
-	str_copy(pSelf->m_Accounts[ID].m_Username, aUsername, sizeof(pSelf->m_Accounts[ID].m_Username));
-	str_copy(pSelf->m_Accounts[ID].m_aLastPlayerName, pSelf->Server()->ClientName(pResult->m_ClientID), sizeof(pSelf->m_Accounts[ID].m_aLastPlayerName));
+	pSelf->m_Accounts.SetPassword(ID, aPassword);
+	str_copy(pSelf->m_Accounts.Get(ID).m_Username, aUsername, sizeof(pSelf->m_Accounts.Get(ID).m_Username));
+	str_copy(pSelf->m_Accounts.Get(ID).m_aLastPlayerName, pSelf->Server()->ClientName(pResult->m_ClientID), sizeof(pSelf->m_Accounts.Get(ID).m_aLastPlayerName));
 	time_t Now;
 	time(&Now);
-	pSelf->m_Accounts[ID].m_RegisterDate = Now;
-	pSelf->Logout(ID);
+	pSelf->m_Accounts.Get(ID).m_RegisterDate = Now;
+	pSelf->m_Accounts.Logout(ID);
 
 	pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("Successfully registered an account, you can login now"));
 	dbg_msg("acc", "account created, file '%s/%s.acc'", pSelf->Config()->m_SvAccFilePath, aUsername);
@@ -1626,8 +1638,8 @@ void CGameContext::ConLogin(IConsole::IResult * pResult, void * pUserData)
 		return;
 	}
 
-	if (pSelf->Login(pResult->m_ClientID, pResult->GetString(0), pResult->GetString(1)))
-		pSelf->CheckLoadPlayer(pResult->m_ClientID);
+	if (pSelf->m_Accounts.Login(pResult->m_ClientID, pResult->GetString(0), pResult->GetString(1)))
+		pSelf->CheckLoadPlayer(pResult->m_ClientID, pSelf->Config()->m_SvSaveTeeForceAccMatch);
 }
 
 void CGameContext::ConLogout(IConsole::IResult * pResult, void * pUserData)
@@ -1677,7 +1689,7 @@ void CGameContext::ConLogout(IConsole::IResult * pResult, void * pUserData)
 		return;
 	}
 
-	pSelf->Logout(ID);
+	pSelf->m_Accounts.Logout(ID);
 }
 
 void CGameContext::ConChangePassword(IConsole::IResult* pResult, void* pUserData)
@@ -1700,13 +1712,13 @@ void CGameContext::ConChangePassword(IConsole::IResult* pResult, void* pUserData
 		return;
 	}
 
-	if (pSelf->m_Accounts[ID].m_aSecurityPin[0] && !pPlayer->m_aSecurityPin[0])
+	if (pSelf->m_Accounts.Get(ID).m_aSecurityPin[0] && !pPlayer->m_aSecurityPin[0])
 	{
 		pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("You are not verified, please enter your security pin using '/pin'"));
 		return;
 	}
 
-	if (pSelf->CheckPassword(ID, pResult->GetString(0)))
+	if (pSelf->m_Accounts.CheckPassword(ID, pResult->GetString(0)))
 	{
 		pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("Wrong password"));
 		return;
@@ -1724,8 +1736,8 @@ void CGameContext::ConChangePassword(IConsole::IResult* pResult, void* pUserData
 		return;
 	}
 
-	pSelf->SetPassword(ID, pResult->GetString(1));
-	pSelf->WriteAccountStats(ID);
+	pSelf->m_Accounts.SetPassword(ID, pResult->GetString(1));
+	pSelf->m_Accounts.WriteAccountStats(ID);
 	pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("Successfully changed password"));
 }
 
@@ -1748,7 +1760,7 @@ void CGameContext::ConContact(IConsole::IResult* pResult, void* pUserData)
 		return;
 	}
 
-	if (pSelf->m_Accounts[pPlayer->GetAccID()].m_aSecurityPin[0] && !pPlayer->m_aSecurityPin[0])
+	if (pSelf->m_Accounts.Get(pPlayer->GetAccID()).m_aSecurityPin[0] && !pPlayer->m_aSecurityPin[0])
 	{
 		pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("You are not verified, please enter your security pin using '/pin'"));
 		return;
@@ -1763,11 +1775,11 @@ void CGameContext::ConContact(IConsole::IResult* pResult, void* pUserData)
 		return;
 	}
 
-	if (pSelf->m_Accounts[pPlayer->GetAccID()].m_aContact[0] == '\0')
+	if (pSelf->m_Accounts.Get(pPlayer->GetAccID()).m_aContact[0] == '\0')
 		pPlayer->GiveXP(500, "for setting initial contact info");
 
-	str_copy(pSelf->m_Accounts[pPlayer->GetAccID()].m_aContact, pContact, sizeof(pSelf->m_Accounts[pPlayer->GetAccID()].m_aContact));
-	pSelf->WriteAccountStats(pPlayer->GetAccID());
+	str_copy(pSelf->m_Accounts.Get(pPlayer->GetAccID()).m_aContact, pContact, sizeof(pSelf->m_Accounts.Get(pPlayer->GetAccID()).m_aContact));
+	pSelf->m_Accounts.WriteAccountStats(pPlayer->GetAccID());
 	pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("Successfully updated contact information, check '/account'"));
 }
 
@@ -1778,7 +1790,7 @@ void CGameContext::ConPin(IConsole::IResult* pResult, void* pUserData)
 	if (!pPlayer)
 		return;
 
-	if (pSelf->IsAccountSystemBanned(pResult->m_ClientID, true))
+	if (pSelf->m_Accounts.IsAccountSystemBanned(pResult->m_ClientID, true))
 		return;
 
 	if (!pSelf->Config()->m_SvAccounts)
@@ -1806,7 +1818,7 @@ void CGameContext::ConPin(IConsole::IResult* pResult, void* pUserData)
 		return;
 	}
 
-	CGameContext::AccountInfo *pAccount = &pSelf->m_Accounts[pPlayer->GetAccID()];
+	CAccounts::AccountInfo *pAccount = &pSelf->m_Accounts.Get(pPlayer->GetAccID());
 
 	const char *pNewPin = pResult->GetString(0);
 	if (str_length(pNewPin) != 4 || str_is_number(pNewPin) != 0)
@@ -1825,7 +1837,7 @@ void CGameContext::ConPin(IConsole::IResult* pResult, void* pUserData)
 		if (pAccount->m_aSecurityPin[0] && str_comp(pAccount->m_aSecurityPin, pNewPin) != 0)
 		{
 			pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("Verification failed"));
-			pSelf->ProcessAccountSystemBan(pResult->m_ClientID, ACC_SYS_PIN);
+			pSelf->m_Accounts.ProcessAccountSystemBan(pResult->m_ClientID, CAccounts::ACC_SYS_PIN);
 			return;
 		}
 
@@ -1886,7 +1898,7 @@ void CGameContext::ConPayMoney(IConsole::IResult* pResult, void* pUserData)
 		pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("That player is not logged in"));
 		return;
 	}
-	if (pSelf->m_Accounts[pPlayer->GetAccID()].m_Money < Money)
+	if (pSelf->m_Accounts.Get(pPlayer->GetAccID()).m_Money < Money)
 	{
 		pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("You don't have enough money"));
 		return;
@@ -1909,7 +1921,7 @@ void CGameContext::ConPayMoney(IConsole::IResult* pResult, void* pUserData)
 	str_format(aBuf, sizeof(aBuf), pPlayer->Localize("You paid %lld money from your bank account to '%s'"), Money, pSelf->Server()->ClientName(pTo->GetCID()));
 	pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
 
-	str_format(aBuf, sizeof(aBuf), pPlayer->Localize("You got %lld money to your bank account from '%s'"), Money, pSelf->Server()->ClientName(pResult->m_ClientID));
+	str_format(aBuf, sizeof(aBuf), pTo->Localize("You got %lld money to your bank account from '%s'"), Money, pSelf->Server()->ClientName(pResult->m_ClientID));
 	pSelf->SendChatTarget(pTo->GetCID(), aBuf);
 }
 
@@ -1960,7 +1972,7 @@ void CGameContext::ConMoney(IConsole::IResult* pResult, void* pUserData)
 
 	pSelf->SendChatTarget(pResult->m_ClientID, "~~~~~~~~~~");
 	for (int i = 4; i >= 0; i--)
-		pSelf->SendChatTarget(pResult->m_ClientID, pSelf->m_Accounts[pPlayer->GetAccID()].m_aLastMoneyTransaction[i]);
+		pSelf->SendChatTarget(pResult->m_ClientID, pSelf->m_Accounts.Get(pPlayer->GetAccID()).m_aLastMoneyTransaction[i]);
 	char aBuf[256];
 	pSelf->SendChatTarget(pResult->m_ClientID, "~~~~~~~~~~");
 	str_format(aBuf, sizeof(aBuf), "%s [%lld]", BankEnabled ? pPlayer->Localize("Bank") : pPlayer->Localize("Wallet"), pPlayer->GetWalletOrBankDisplay());
@@ -1970,9 +1982,9 @@ void CGameContext::ConMoney(IConsole::IResult* pResult, void* pUserData)
 		str_format(aBuf, sizeof(aBuf), "%s [%lld]", pPlayer->Localize("Wallet"), pPlayer->GetWalletMoney());
 		pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
 	}
-	if (pSelf->Config()->m_SvEuroMode || pSelf->m_Accounts[pPlayer->GetAccID()].m_Euros > 0)
+	if (pSelf->Config()->m_SvEuroMode || pSelf->m_Accounts.Get(pPlayer->GetAccID()).m_Euros > 0)
 	{
-		str_format(aBuf, sizeof(aBuf), "EUR [%.2f]", pSelf->m_Accounts[pPlayer->GetAccID()].m_Euros);
+		str_format(aBuf, sizeof(aBuf), "EUR [%.2f]", pSelf->m_Accounts.Get(pPlayer->GetAccID()).m_Euros);
 		pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
 	}
 	pSelf->SendChatTarget(pResult->m_ClientID, "~~~~~~~~~~");
@@ -1986,7 +1998,7 @@ void CGameContext::ConPortal(IConsole::IResult* pResult, void* pUserData)
 	if (!pPlayer)
 		return;
 
-	CGameContext::AccountInfo *pAccount = &pSelf->m_Accounts[pSelf->m_apPlayers[pResult->m_ClientID]->GetAccID()];
+	CAccounts::AccountInfo *pAccount = &pSelf->m_Accounts.Get(pSelf->m_apPlayers[pResult->m_ClientID]->GetAccID());
 
 	if (pResult->NumArguments() > 0)
 	{
@@ -2042,7 +2054,7 @@ void CGameContext::ConRoom(IConsole::IResult* pResult, void* pUserData)
 	if (!pPlayer)
 		return;
 
-	if (!pSelf->m_Accounts[pPlayer->GetAccID()].m_VIP)
+	if (!pSelf->m_Accounts.Get(pPlayer->GetAccID()).m_VIP)
 	{
 		pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("You are not VIP"));
 		return;
@@ -2171,6 +2183,7 @@ void CGameContext::ConSpawn(IConsole::IResult* pResult, void* pUserData)
 	pChr->ReleaseHook();
 	pChr->ForceSetPos(Pos);
 	pChr->ResetOnlyFirstPortal();
+	pChr->SetSafeArea(false);
 
 	// create death effect and do a nice sound when teleporting to spawn
 	Mask128 TeamMask = pChr->TeamMask();
@@ -2249,9 +2262,9 @@ void CGameContext::ConPlot(IConsole::IResult* pResult, void* pUserData)
 		return;
 	}
 
-	int Price = pResult->NumArguments() > 1 ? max(1, str_toint(pResult->GetString(1))) : 0; // clamp price to 0
+	int Price = pResult->NumArguments() > 1 ? maximum(1, str_toint(pResult->GetString(1))) : 0; // clamp price to 0
 	int OwnAccID = pSelf->m_apPlayers[pResult->m_ClientID]->GetAccID();
-	int OwnPlotID = pSelf->GetPlotID(OwnAccID);
+	int OwnPlotID = pSelf->m_Plots.GetPlotID(OwnAccID);
 
 	if (!str_comp_nocase(pCommand, "buy"))
 	{
@@ -2300,14 +2313,14 @@ void CGameContext::ConPlot(IConsole::IResult* pResult, void* pUserData)
 			return;
 		}
 
-		if (pSelf->HasPlotByIP(pResult->m_ClientID))
+		if (pSelf->m_Plots.HasPlotByIP(pResult->m_ClientID))
 		{
 			pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("Your IP address already owns one plot"));
 			return;
 		}
 
 		// success
-		int PlotID = pSelf->GetPlotID(pSeller->GetAccID());
+		int PlotID = pSelf->m_Plots.GetPlotID(pSeller->GetAccID());
 
 		pSelf->SendChatFormat(-1, CHAT_ALL, -1, CHATFLAG_ALL, Localizable("Plot %d has been bought by '%s'"), PlotID, pSelf->Server()->ClientName(pResult->m_ClientID));
 
@@ -2329,7 +2342,7 @@ void CGameContext::ConPlot(IConsole::IResult* pResult, void* pUserData)
 
 		pSeller->StopPlotEditing();
 
-		pSelf->SetPlotInfo(PlotID, pPlayer->GetAccID());
+		pSelf->m_Plots.SetPlotInfo(PlotID, pPlayer->GetAccID());
 	}
 	else if (!str_comp_nocase(pCommand, "list"))
 	{
@@ -2376,7 +2389,7 @@ void CGameContext::ConPlot(IConsole::IResult* pResult, void* pUserData)
 			return;
 		}
 
-		if (pSelf->PlotCanBeRaided(OwnPlotID))
+		if (pSelf->m_Plots.PlotCanBeRaided(OwnPlotID))
 		{
 			pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("You can't sell your plot when being wanted"));
 			return;
@@ -2405,7 +2418,7 @@ void CGameContext::ConPlot(IConsole::IResult* pResult, void* pUserData)
 		pPlayer->m_LastPlotAuction = pSelf->Server()->Tick();
 
 		pSelf->SendChatFormat(-1, CHAT_ALL, -1, CHATFLAG_ALL, Localizable("'%s' started an auction on plot %d for %d money (plot expires on %s)"),
-			pSelf->Server()->ClientName(pResult->m_ClientID), OwnPlotID, Price, pSelf->GetDate(pSelf->m_aPlots[OwnPlotID].m_ExpireDate));
+			pSelf->Server()->ClientName(pResult->m_ClientID), OwnPlotID, Price, pSelf->m_Plots.GetPlotExpireDate(OwnPlotID));
 
 		pSelf->SendChatFormat(-1, CHAT_ALL, -1, CGameContext::CHATFLAG_ALL, Localizable("Use '/plot buy %d %s' to buy the plot"),
 			Price, pSelf->Server()->ClientName(pResult->m_ClientID));
@@ -2431,7 +2444,7 @@ void CGameContext::ConPlot(IConsole::IResult* pResult, void* pUserData)
 			return;
 		}
 
-		if (pSelf->PlotCanBeRaided(OwnPlotID))
+		if (pSelf->m_Plots.PlotCanBeRaided(OwnPlotID))
 		{
 			pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("You can't swap plots when being wanted"));
 			return;
@@ -2453,7 +2466,7 @@ void CGameContext::ConPlot(IConsole::IResult* pResult, void* pUserData)
 		}
 
 		int SwapAccID = pSwap->GetAccID();
-		int SwapPlotID = pSelf->GetPlotID(SwapAccID);
+		int SwapPlotID = pSelf->m_Plots.GetPlotID(SwapAccID);
 		if (SwapPlotID == 0)
 		{
 			pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("This player doesn't own a plot"));
@@ -2468,14 +2481,14 @@ void CGameContext::ConPlot(IConsole::IResult* pResult, void* pUserData)
 
 		pPlayer->m_LastPlotSwap = pSelf->Server()->Tick();
 		pPlayer->CancelPlotAuction();
-		str_copy(pPlayer->m_aPlotSwapUsername, pSelf->m_Accounts[SwapAccID].m_Username, sizeof(pPlayer->m_aPlotSwapUsername));
+		str_copy(pPlayer->m_aPlotSwapUsername, pSelf->m_Accounts.Get(SwapAccID).m_Username, sizeof(pPlayer->m_aPlotSwapUsername));
 		
 		const char *pOwnName = pSelf->Server()->ClientName(pResult->m_ClientID);
-		if (str_comp(pPlayer->m_aPlotSwapUsername, pSelf->m_Accounts[SwapAccID].m_Username) == 0
-			&& str_comp(pSwap->m_aPlotSwapUsername, pSelf->m_Accounts[OwnAccID].m_Username) == 0)
+		if (str_comp(pPlayer->m_aPlotSwapUsername, pSelf->m_Accounts.Get(SwapAccID).m_Username) == 0
+			&& str_comp(pSwap->m_aPlotSwapUsername, pSelf->m_Accounts.Get(OwnAccID).m_Username) == 0)
 		{
-			pSelf->SetPlotInfo(OwnPlotID, SwapAccID);
-			pSelf->SetPlotInfo(SwapPlotID, OwnAccID);
+			pSelf->m_Plots.SetPlotInfo(OwnPlotID, SwapAccID);
+			pSelf->m_Plots.SetPlotInfo(SwapPlotID, OwnAccID);
 			pPlayer->m_aPlotSwapUsername[0] = 0;
 			pSwap->m_aPlotSwapUsername[0] = 0;
 			pPlayer->StopPlotEditing();
@@ -2515,6 +2528,27 @@ void CGameContext::ConHideBroadcasts(IConsole::IResult *pResult, void *pUserData
 	if (pPlayer) pPlayer->SetHideBroadcasts(pResult->NumArguments() ? pResult->GetInteger(0) : !pPlayer->m_HideBroadcasts);
 }
 
+void CGameContext::ConAntiPing(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientID];
+	if (pPlayer) pPlayer->SetAntiPing(pResult->NumArguments() ? pResult->GetInteger(0) : !pPlayer->AntiPing());
+}
+
+void CGameContext::ConHighBandwidth(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientID];
+	if (pPlayer) pPlayer->SetHighBandwidth(pResult->NumArguments() ? pResult->GetInteger(0) : !pSelf->Server()->GetHighBandwidth(pResult->m_ClientID));
+}
+
+void CGameContext::ConSaveSession(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientID];
+	if (pPlayer) pPlayer->SetSavePlayerDisconnect(pResult->NumArguments() ? pResult->GetInteger(0) : !pPlayer->m_SavePlayerDisconnect);
+}
+
 void CGameContext::ConSilentFarm(IConsole::IResult *pResult, void *pUserData)
 {
 	CGameContext *pSelf = (CGameContext *) pUserData;
@@ -2545,7 +2579,7 @@ void CGameContext::ConPoliceInfo(IConsole::IResult *pResult, void *pUserData)
 	{
 		int Level = 0;
 		int Policelevel = Page - 1;
-		char aPolice[64];
+		char aPolice[128];
 
 		if (Policelevel == 1)
 			Level = 18;
@@ -2686,6 +2720,7 @@ void CGameContext::ConLanguage(IConsole::IResult* pResult, void* pUserData)
 	pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
 	str_format(aBuf, sizeof(aBuf), "%s: %s", pPlayer->Localize("Current language"), g_Localization.GetLanguageString(pPlayer->m_Language));
 	pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
+	pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("English translation by the developers"));
 	pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("You can set one of the following languages for server-side translation by using '/language <option>':"));
 	pSelf->SendChatTarget(pResult->m_ClientID, g_Localization.ListAvailable());
 }
@@ -2844,142 +2879,65 @@ void CGameContext::Con1VS1(IConsole::IResult *pResult, void *pUserData)
 	char aBuf[128];
 	str_copy(aBuf, pResult->GetFullString(), sizeof(aBuf));
 	const char *pRest = pSelf->GetWhisper(aBuf, &OtherID);
-	if (pSelf->Arenas()->AcceptFight(OtherID, pResult->m_ClientID))
-		return;
 
+	int64 Stake = 0;
 	int ScoreLimit = 10;
 	int KillBorder = 0;
 	if (pResult->NumArguments() > 1) // more than just name
-	{
-		int Num = sscanf(pRest, "%d %d", &ScoreLimit, &KillBorder);
-		if (Num == 1)
-			KillBorder = 0;
-	}
+		sscanf(pRest, "%lld %d %d", &Stake, &ScoreLimit, &KillBorder);
 
-	pSelf->Arenas()->StartConfiguration(pResult->m_ClientID, OtherID, ScoreLimit, KillBorder);
-}
-
-void CGameContext::SendTop5AccMessage(IConsole::IResult* pResult, void* pUserData, int Type)
-{
-	CGameContext* pSelf = (CGameContext*)pUserData;
-	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientID];
-	if (!pPlayer)
+	if (pSelf->Arenas()->AcceptFight(OtherID, pResult->m_ClientID, Stake))
 		return;
 
-	pSelf->LazyLoadTopAccounts(Type);
-
-	char aBuf[512];
-	int Debut = pResult->NumArguments() >= 1 && pResult->GetInteger(0) != 0 ? pResult->GetInteger(0) : 1;
-	Debut = max(1, Debut < 0 ? (int)pSelf->m_TopAccounts.size() + Debut - 3 : Debut);
-
-	// Header
-	const char *pType = "";
-	switch (Type)
-	{
-	case TOP_LEVEL: pType = pPlayer->Localize("Level"); break;
-	case TOP_POINTS: pType = pPlayer->Localize("Points"); break;
-	case TOP_MONEY: pType = pPlayer->Localize("Money"); break;
-	case TOP_SPREE: pType = pPlayer->Localize("Spree"); break;
-	case TOP_PORTAL_BATTERY: pType = pPlayer->Localize("Portal Battery"); break;
-	case TOP_PORTAL_BLOCKER: pType = pPlayer->Localize("Portal Blocker"); break;
-	case TOP_DURAK_WINS: pType = pPlayer->Localize("Durák Wins"); break;
-	case TOP_DURAK_PROFIT: pType = pPlayer->Localize("Durák Profit"); break;
-	}
-
-	str_format(aBuf, sizeof(aBuf), "----------- Top 5 %s -----------", pType);
-	pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
-
-	// Short name for entries
-	switch (Type)
-	{
-	case TOP_PORTAL_BATTERY: pType = "Batteries"; break;
-	case TOP_PORTAL_BLOCKER: pType = "Blockers"; break;
-	case TOP_DURAK_WINS: pType = "Wins"; break;
-	case TOP_DURAK_PROFIT: pType = "Profit"; break;
-	}
-
-	for (int i = 0; i < 5; i++)
-	{
-		if (i + Debut > (int)pSelf->m_TopAccounts.size())
-			break;
-		CGameContext::TopAccounts* r = &pSelf->m_TopAccounts[i + Debut - 1];
-
-		if (Type == TOP_MONEY)
-		{
-			str_format(aBuf, sizeof(aBuf), "%d. %s %s: %lld", i + Debut, r->m_aUsername, pPlayer->Localize("Money"), r->m_Money);
-		}
-		else
-		{
-			int Value = -1;
-			switch (Type)
-			{
-			case TOP_LEVEL: Value = r->m_Level; break;
-			case TOP_POINTS: Value = r->m_Points; break;
-			case TOP_SPREE: Value = r->m_KillStreak; break;
-			case TOP_PORTAL_BATTERY: Value = r->m_PortalBattery; break;
-			case TOP_PORTAL_BLOCKER: Value = r->m_PortalBlocker; break;
-			case TOP_DURAK_WINS: Value = r->m_DurakWins; break;
-			case TOP_DURAK_PROFIT: Value = r->m_DurakProfit; break;
-			}
-			char aValue[64];
-			str_format(aValue, sizeof(aValue), "%s%d%s", Type == TOP_DURAK_PROFIT && Value > 0 ? "+" : "", Value, Type == TOP_DURAK_PROFIT ? "$" : "");
-			str_format(aBuf, sizeof(aBuf), "%d. %s %s: %s", i + Debut, r->m_aUsername, pType, aValue);
-		}
-
-		pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
-	}
-	pSelf->SendChatTarget(pResult->m_ClientID, "----------------------------------------");
-
-	// Unload top accounts again after lazy loading
-	pSelf->m_TopAccounts.clear();
+	pSelf->Arenas()->StartConfiguration(pResult->m_ClientID, OtherID, Stake, ScoreLimit, KillBorder);
 }
 
 void CGameContext::ConTop5Level(IConsole::IResult* pResult, void* pUserData)
 {
 	CGameContext* pSelf = (CGameContext*)pUserData;
-	pSelf->SendTop5AccMessage(pResult, pUserData, TOP_LEVEL);
+	pSelf->m_Accounts.SendTop5AccMessage(pResult, pUserData, CAccounts::TOP_LEVEL);
 }
 
 void CGameContext::ConTop5Points(IConsole::IResult* pResult, void* pUserData)
 {
 	CGameContext* pSelf = (CGameContext*)pUserData;
-	pSelf->SendTop5AccMessage(pResult, pUserData, TOP_POINTS);
+	pSelf->m_Accounts.SendTop5AccMessage(pResult, pUserData, CAccounts::TOP_POINTS);
 }
 
 void CGameContext::ConTop5Money(IConsole::IResult* pResult, void* pUserData)
 {
 	CGameContext* pSelf = (CGameContext*)pUserData;
-	pSelf->SendTop5AccMessage(pResult, pUserData, TOP_MONEY);
+	pSelf->m_Accounts.SendTop5AccMessage(pResult, pUserData, CAccounts::TOP_MONEY);
 }
 
 void CGameContext::ConTop5Spree(IConsole::IResult* pResult, void* pUserData)
 {
 	CGameContext* pSelf = (CGameContext*)pUserData;
-	pSelf->SendTop5AccMessage(pResult, pUserData, TOP_SPREE);
+	pSelf->m_Accounts.SendTop5AccMessage(pResult, pUserData, CAccounts::TOP_SPREE);
 }
 
 void CGameContext::ConTop5PortalBattery(IConsole::IResult* pResult, void* pUserData)
 {
 	CGameContext* pSelf = (CGameContext*)pUserData;
-	pSelf->SendTop5AccMessage(pResult, pUserData, TOP_PORTAL_BATTERY);
+	pSelf->m_Accounts.SendTop5AccMessage(pResult, pUserData, CAccounts::TOP_PORTAL_BATTERY);
 }
 
 void CGameContext::ConTop5PortalBlocker(IConsole::IResult* pResult, void* pUserData)
 {
 	CGameContext* pSelf = (CGameContext*)pUserData;
-	pSelf->SendTop5AccMessage(pResult, pUserData, TOP_PORTAL_BLOCKER);
+	pSelf->m_Accounts.SendTop5AccMessage(pResult, pUserData, CAccounts::TOP_PORTAL_BLOCKER);
 }
 
 void CGameContext::ConTop5DurakWins(IConsole::IResult* pResult, void* pUserData)
 {
 	CGameContext* pSelf = (CGameContext*)pUserData;
-	pSelf->SendTop5AccMessage(pResult, pUserData, TOP_DURAK_WINS);
+	pSelf->m_Accounts.SendTop5AccMessage(pResult, pUserData, CAccounts::TOP_DURAK_WINS);
 }
 
 void CGameContext::ConTop5DurakProfit(IConsole::IResult* pResult, void* pUserData)
 {
 	CGameContext* pSelf = (CGameContext*)pUserData;
-	pSelf->SendTop5AccMessage(pResult, pUserData, TOP_DURAK_PROFIT);
+	pSelf->m_Accounts.SendTop5AccMessage(pResult, pUserData, CAccounts::TOP_DURAK_PROFIT);
 }
 
 void CGameContext::ConPoliceHelper(IConsole::IResult* pResult, void* pUserData)
@@ -2989,7 +2947,7 @@ void CGameContext::ConPoliceHelper(IConsole::IResult* pResult, void* pUserData)
 	if (!pPlayer)
 		return;
 
-	if (pSelf->m_Accounts[pPlayer->GetAccID()].m_PoliceLevel < 2)
+	if (pSelf->m_Accounts.Get(pPlayer->GetAccID()).m_PoliceLevel < 2)
 	{
 		pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("You need to be police level 2 to use this command"));
 		return;
@@ -3009,7 +2967,7 @@ void CGameContext::ConPoliceHelper(IConsole::IResult* pResult, void* pUserData)
 			pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("That player doesn't exist"));
 			return;
 		}
-		else if (pSelf->m_Accounts[pChr->GetPlayer()->GetAccID()].m_PoliceLevel)
+		else if (pSelf->m_Accounts.Get(pChr->GetPlayer()->GetAccID()).m_PoliceLevel)
 		{
 			pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("This player is a police officer"));
 			return;
@@ -3034,7 +2992,7 @@ void CGameContext::ConPoliceHelper(IConsole::IResult* pResult, void* pUserData)
 			pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("That player doesn't exist"));
 			return;
 		}
-		else if (pSelf->m_Accounts[pChr->GetPlayer()->GetAccID()].m_PoliceLevel)
+		else if (pSelf->m_Accounts.Get(pChr->GetPlayer()->GetAccID()).m_PoliceLevel)
 		{
 			pSelf->SendChatTarget(pResult->m_ClientID, pPlayer->Localize("This player is a police officer"));
 			return;
@@ -3117,7 +3075,7 @@ void CGameContext::ConTaserInfo(IConsole::IResult* pResult, void* pUserData)
 	if (!pPlayer)
 		return;
 
-	CGameContext::AccountInfo *pAccount = &pSelf->m_Accounts[pSelf->m_apPlayers[pResult->m_ClientID]->GetAccID()];
+	CAccounts::AccountInfo *pAccount = &pSelf->m_Accounts.Get(pSelf->m_apPlayers[pResult->m_ClientID]->GetAccID());
 
 	if (pResult->NumArguments() > 0)
 	{
@@ -3158,7 +3116,7 @@ void CGameContext::ConTaserInfo(IConsole::IResult* pResult, void* pUserData)
 	pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
 	if (pAccount->m_TaserLevel < NUM_TASER_LEVELS)
 	{
-		str_format(aBuf, sizeof(aBuf), "%s: %d", pPlayer->Localize("Price for the next level"), pSelf->m_aTaserPrice[pAccount->m_TaserLevel]);
+		str_format(aBuf, sizeof(aBuf), "%s: %d", pPlayer->Localize("Price for the next level"), pSelf->m_Accounts.m_aTaserPrice[pAccount->m_TaserLevel]);
 		pSelf->SendChatTarget(pResult->m_ClientID, aBuf);
 	}
 	str_format(aBuf, sizeof(aBuf), pPlayer->Localize("Freeze time: %.2f seconds"), pAccount->m_TaserLevel * 0.1f);

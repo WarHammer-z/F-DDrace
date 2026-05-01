@@ -12,6 +12,7 @@ class CCharacter;
 class CPlayer;
 class CGameContext;
 class CDoor;
+class CDrawTile;
 
 // Needs to be here because we need it in gamecontext.h but also in draweditor.h
 class CSelectedArea
@@ -23,9 +24,42 @@ public:
 
 	int m_aID[4];
 	vec2 m_aPos[2];
-	vec2 TopLeft() { return vec2(min(m_aPos[0].x, m_aPos[1].x), min(m_aPos[0].y, m_aPos[1].y)); }
-	vec2 BottomRight() { return vec2(max(m_aPos[0].x, m_aPos[1].x), max(m_aPos[0].y, m_aPos[1].y)); }
+	vec2 TopLeft() { return vec2(minimum(m_aPos[0].x, m_aPos[1].x), minimum(m_aPos[0].y, m_aPos[1].y)); }
+	vec2 BottomRight() { return vec2(maximum(m_aPos[0].x, m_aPos[1].x), maximum(m_aPos[0].y, m_aPos[1].y)); }
 	bool Includes(vec2 Pos) { return (Pos.x >= TopLeft().x-1 && Pos.x <= BottomRight().x+1 && Pos.y >= TopLeft().y-1 && Pos.y <= BottomRight().y+1); }
+};
+
+class CNotTheseEntities
+{
+private:
+	CEntity* m_pSingleEntity;
+	CEntity** m_apExcludeEntities;
+	int m_NumEntities;
+
+public:
+	// Automatic cast (short scope)
+	CNotTheseEntities(CEntity* pSingleEntity)
+	{
+		m_pSingleEntity = pSingleEntity;
+		m_apExcludeEntities = &m_pSingleEntity;
+		m_NumEntities = 1;
+	}
+	CNotTheseEntities(CEntity** apEntities, int NumEntities)
+	{
+		m_pSingleEntity = nullptr;
+		m_apExcludeEntities = apEntities;
+		m_NumEntities = NumEntities;
+	}
+
+	// Getting
+	bool IsExcluded(CEntity* pEntity) const
+	{
+		for (int i = 0; i < m_NumEntities; i++)
+			if (m_apExcludeEntities[i] == pEntity)
+				return true;
+
+		return false;
+	}
 };
 
 /*
@@ -73,8 +107,10 @@ public:
 		ENTTYPE_LIGHTNING_LASER,
 		ENTTYPE_GROG,
 		ENTTYPE_TASER_SHIELD,
-		ENTTYPE_PLAYER_COUNTER,
 		ENTTYPE_MISSILE,
+		ENTTYPE_PLAYER_COUNTER,
+		ENTTYPE_DRAWTILE,
+		ENTTYPE_SPIDER,
 
 		NUM_ENTTYPES
 	};
@@ -101,7 +137,7 @@ private:
 		};
 
 		void Init(int ClientID, CGameWorld *pGameWorld);
-		void InitPlayer(bool Rejoin);
+		void InitPlayer(bool Rejoin, bool Timeout);
 		CGameWorld *m_pGameWorld;
 		CPlayer *GetPlayer();
 		int m_ClientID;
@@ -130,6 +166,7 @@ private:
 		void AddToNumReserved(int Summand);
 	} m_aMap[MAX_CLIENTS];
 	void UpdatePlayerMap(int ClientID);
+	//int m_aTeamSizes[MAX_CLIENTS];
 
 public:
 	class CGameContext *GameServer() { return m_pGameServer; }
@@ -148,10 +185,29 @@ public:
 		bool IsActive() { return m_MaxPoliceTilePlayers <= 0 || m_NumPoliceTilePlayers <= m_MaxPoliceTilePlayers; }
 	} m_PoliceFarm;
 
-	void InitPlayerMap(int ClientID, bool Rejoin = false) { m_aMap[ClientID].InitPlayer(Rejoin); }
+	class CDrawTileContext
+	{
+		std::set<CDrawTile *> m_vpResponsibleTiles;
+		std::set<CDrawTile *> m_vPendingRemovals;
+
+	public:
+		void Insert(CDrawTile *pEnt) { m_vpResponsibleTiles.insert(pEnt); }
+		void MarkForRemoval(CDrawTile *pEnt) { m_vPendingRemovals.insert(pEnt); }
+		void ProcessRemovals()
+		{
+			for (auto &pPendingRemoval : m_vPendingRemovals)
+				m_vpResponsibleTiles.erase(pPendingRemoval);
+			m_vPendingRemovals.clear();
+		}
+		const std::set<CDrawTile *> &ResponsibleTiles() const { return m_vpResponsibleTiles; }
+	};
+	CDrawTileContext m_DrawTiles;
+
+	void InitPlayerMap(int ClientID, bool Rejoin = false, bool Timeout = false) { m_aMap[ClientID].InitPlayer(Rejoin, Timeout); }
 	void UpdateTeamsState(int ClientID) { m_aMap[ClientID].m_UpdateTeamsState = true; }
 	void ForceInsertPlayer(int Insert, int ClientID) { m_aMap[ClientID].InsertNextEmpty(Insert); }
 	void AddToNumReserved(int ClientID, int Summand) { m_aMap[ClientID].AddToNumReserved(Summand); }
+	bool ReserveTeamSlots(int DDTeam, int AskerID);
 
 	enum
 	{
@@ -208,7 +264,7 @@ public:
 		Returns:
 			Returns a pointer to the closest CEntity or NULL if no CEntity is close enough.
 	*/
-	CEntity *ClosestEntity(vec2 Pos, float Radius, int Type, CEntity *pNotThis, bool CheckWall = false, int Team = -1);
+	CEntity *ClosestEntity(vec2 Pos, float Radius, int Type, CEntity *pNotThis, int Team = -1, bool CheckWall = false);
 
 	/*
 		Function: interserct_CCharacter
@@ -226,6 +282,16 @@ public:
 	*/
 	class CCharacter* IntersectCharacter(vec2 Pos0, vec2 Pos1, float Radius, vec2& NewPos, class CCharacter* pNotThis = 0, int CollideWith = -1, class CCharacter* pThisOnly = 0);
 
+
+	enum EFindEntFlag
+	{
+		PASSIVE = 1<<0,
+		WALL = 1<<1,
+		MINIGAME_TEE = 1<<2,
+		IN_HELICOPTER = 1<<3,
+		SAFE_AREA = 1<<4,
+	};
+
 	/*
 		Function: closest_CCharacter
 			Finds the closest CCharacter to a specific point.
@@ -238,7 +304,7 @@ public:
 		Returns:
 			Returns a pointer to the closest CCharacter or NULL if no CCharacter is close enough.
 	*/
-	class CCharacter* ClosestCharacter(vec2 Pos, float Radius, CEntity* ppNotThis, int CollideWith = -1, bool CheckPassive = true, bool CheckWall = false, bool CheckMinigameTee = false, int Team = -1, bool CheckDrivers = true);
+	class CCharacter* ClosestCharacter(vec2 Pos, float Radius, CEntity* ppNotThis, int CollideWith = -1, int Team = -1, int Flags = -1);
 
 	/*
 		Function: insert_entity
@@ -277,7 +343,7 @@ public:
 			is being created.
 	*/
 	void Snap(int SnappingClient);
-	
+
 	void PostSnap();
 
 	/*
@@ -309,14 +375,21 @@ public:
 	*/
 	std::list<class CCharacter*> IntersectedCharacters(vec2 Pos0, vec2 Pos1, float Radius, class CEntity* pNotThis = 0, int CollideWith = -1);
 
-	class CCharacter* ClosestCharacter(vec2 Pos, CCharacter* pNotThis, int CollideWith = -1, int Mode = 0);
+	class CCharacter* ClosestCharacterMode(vec2 Pos, CCharacter* pNotThis, int CollideWith = -1, int Mode = 0);
 	int GetClosestHouseDummy(vec2 Pos, CCharacter* pNotThis, int Type, int CollideWith = -1);
 
-	// when defining the Types, add them bitwise: 1 << TYPE | 1 << TYPE2...
-	CEntity *ClosestEntityTypes(vec2 Pos, float Radius, int Types, CEntity *pNotThis, int CollideWith = -1, bool CheckPassive = true, bool CheckDrivers = true);
-	int FindEntitiesTypes(vec2 Pos, float Radius, CEntity **ppEnts, int Max, int Types, int Team = -1);
-	CEntity *IntersectEntityTypes(vec2 Pos0, vec2 Pos1, float Radius, vec2& NewPos, CEntity *pNotThis, int CollideWith, int Types,
-		class CCharacter *pThisOnly = 0, bool CheckPlotTaserDestroy = false, bool PlotDoorOnly = false, bool CheckDrivers = true);
+	// when defining the Types, add them bitwise: 1 << TYPE | 1 << TYPE2... (or 1ULL << TYPE32 for types over 31)
+	CEntity *ClosestEntityTypes(vec2 Pos, float Radius, int64 Types, CEntity *pNotThis, int CollideWith = -1, int Flags = -1);
+	int FindEntitiesTypes(vec2 Pos, float Radius, CEntity **ppEnts, int Max, int64 Types, int Team = -1, bool ProjHammer = false);
+
+	enum EIntersectEntTypesFlag
+	{
+		PLOT_TASER_DESTROY = 1<<0,
+		PLOT_DOOR_ONLY = 1<<1,
+		IN_VEHICLE = 1<<2,
+		PREVENT_EVENT_PREDICTION = 1<<3,
+	};
+	CEntity *IntersectEntityTypes(vec2 Pos0, vec2 Pos1, float Radius, vec2& NewPos, const CNotTheseEntities& NotThese, int CollideWith, int64 Types, CCharacter *pThisOnly = nullptr, int Flags = -1);
 	bool IntersectLinePortalBlocker(vec2 Pos0, vec2 Pos1);
 	int IntersectDoorsUniqueNumbers(vec2 Pos, float Radius, CDoor **ppDoors, int Max);
 };

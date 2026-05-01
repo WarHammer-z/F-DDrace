@@ -18,6 +18,7 @@ CDummyBlmapChillPolice::CDummyBlmapChillPolice(CCharacter *pChr)
 	m_FailedAttempts = 0;
 	m_Confused = 0;
 	m_Sad = 0;
+	m_GetSpeed = false;
 
 	m_IsHelpHook = false;
 	m_IsClosestPolice = false;
@@ -29,6 +30,9 @@ CDummyBlmapChillPolice::CDummyBlmapChillPolice(CCharacter *pChr)
 	m_HasReachedCinemaEntrance = false;
 
 	m_LastStuckCheckPos = vec2(0, 0);
+
+	// flappy account
+	Login("BlmapChillPolice");
 }
 
 bool CDummyBlmapChillPolice::CheckStuck()
@@ -76,17 +80,17 @@ bool CDummyBlmapChillPolice::CheckStuck()
 		if (m_Sad > 6)
 		{
 			Jump();
-			if (TicksPassed(random(10, 400)))
+			if (TicksPassed(random_int(10, 400)))
 				Jump(false);
 		}
 		if (m_Sad > 7)
 		{
 			Hook();
-			if (TicksPassed(random(10, 400)))
+			if (TicksPassed(random_int(10, 400)))
 				Hook(false);
 		}
 		if (m_Sad > 8 && (IsStuck || m_Sad > 9))
-			Aim(random(-100, 100), random(-100, 100));
+			Aim(random_int(-100, 100), random_int(-100, 100));
 		if (m_Sad > 20)
 		{
 			Die();
@@ -174,7 +178,7 @@ void CDummyBlmapChillPolice::OldPoliceMoves()
 	{
 		m_HelpMode = 0;
 		// check if officer needs help
-		CCharacter *pChr = GameWorld()->ClosestCharacter(GetPos(), m_pCharacter, m_pPlayer->GetCID(), 1);
+		CCharacter *pChr = GameWorld()->ClosestCharacterMode(GetPos(), m_pCharacter, m_pPlayer->GetCID(), 1);
 		if (pChr && pChr->IsAlive())
 		{
 			if (Y > 435) // setting the destination of dummy to top left police entry bcs otherwise bot fails when trying to help --> walks into jail wall xd
@@ -186,7 +190,7 @@ void CDummyBlmapChillPolice::OldPoliceMoves()
 
 			m_IsClosestPolice = false;
 
-			if (pChr->m_PoliceHelper || GameServer()->m_Accounts[pChr->GetPlayer()->GetAccID()].m_PoliceLevel)
+			if (pChr->m_PoliceHelper || GameServer()->m_Accounts.Get(pChr->GetPlayer()->GetAccID()).m_PoliceLevel)
 				m_IsClosestPolice = true;
 
 			if (pChr->Core()->m_Pos.x > RAW(444) - 10) // police dude failed too far --> to be reached by hook (set too help mode extream to leave save area)
@@ -1144,7 +1148,7 @@ void CDummyBlmapChillPolice::WalkPoliceDir(int Direction)
 			Aim(0, 200);
 			Fire();
 			if (IsGrounded())
-				Jump(random(3));
+				Jump(random_int(3));
 		}
 	}
 	// when high enough stay there and move on the upper area
@@ -1189,7 +1193,7 @@ void CDummyBlmapChillPolice::WalkPoliceDir(int Direction)
 bool CDummyBlmapChillPolice::HelpOfficerLeft()
 {
 	// check if officer needs help
-	CCharacter *pChr = GameWorld()->ClosestCharacter(GetPos(), m_pCharacter, m_pPlayer->GetCID(), 10);
+	CCharacter *pChr = GameWorld()->ClosestCharacterMode(GetPos(), m_pCharacter, m_pPlayer->GetCID(), 10);
 	if (!pChr || !pChr->IsAlive())
 		return true;
 	if (X > 383)
@@ -1229,7 +1233,7 @@ bool CDummyBlmapChillPolice::HelpOfficerLeft()
 			Right();
 		if (X < 369)
 		{
-			CCharacter *pClosestChr = GameWorld()->ClosestCharacter(GetPos(), m_pCharacter, m_pPlayer->GetCID());
+			CCharacter *pClosestChr = GameWorld()->ClosestCharacterMode(GetPos(), m_pCharacter, m_pPlayer->GetCID());
 			// if on left side and closes char is not police
 			// make sure that boi is blocked first otherwise he is just in the way
 			if (!IsPolice(pClosestChr) && !pClosestChr->m_IsFrozen)
@@ -1277,7 +1281,7 @@ bool CDummyBlmapChillPolice::HelpOfficerLeft()
 bool CDummyBlmapChillPolice::HelpOfficerRight()
 {
 	// check if officer needs help
-	CCharacter *pChr = GameWorld()->ClosestCharacter(GetPos(), m_pCharacter, m_pPlayer->GetCID(), 1);
+	CCharacter *pChr = GameWorld()->ClosestCharacterMode(GetPos(), m_pCharacter, m_pPlayer->GetCID(), 1);
 	if (!pChr || !pChr->IsAlive())
 		return false;
 	if (X < 422)

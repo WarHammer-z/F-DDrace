@@ -5,8 +5,8 @@
 
 #include "minigame.h"
 #include <vector>
+#include <game/server/player.h>
 
-class CPlayer;
 class CCharacter;
 
 class CFight
@@ -37,6 +37,7 @@ public:
 	vec2 m_aCorners[4];
 	vec2 m_aSpawns[2];
 	vec2 m_MiddlePos;
+	int64 m_Stake;
 	int m_ScoreLimit;
 	bool m_KillBorder;
 	bool m_LongFreezeStart;
@@ -61,6 +62,8 @@ class CArenas : public CMinigame
 {
 	enum
 	{
+		MAX_ARENAS_STAKE = 10000000,
+
 		MAX_FIGHTS = VANILLA_MAX_CLIENTS-1, // team 1-63
 
 		POINT_TOP_LEFT = 0,
@@ -96,6 +99,8 @@ class CArenas : public CMinigame
 	bool IsGrounded(CCharacter *pChr);
 	bool ValidSpawnPos(vec2 Pos);
 	void StartFight(int Fight);
+	bool CanPayStake(int ClientID, int64 Stake);
+	void ProcessPlayerWin(int ClientID, int64 Stake);
 
 	int m_aState[MAX_CLIENTS];
 	int m_aLastDirection[MAX_CLIENTS];
@@ -120,11 +125,18 @@ public:
 		PARTICIPANT_GLOBAL = -2,
 	};
 
-	CArenas(CGameContext *pGameServer, int Type);
+	CArenas(CGameContext *pGameServer);
 	virtual ~CArenas();
 
-	virtual void Tick();
-	virtual void Snap(int SnappingClient);
+	void Tick() override;
+	void Snap(int SnappingClient) override;
+
+	int SpawnIndex(int ClientID) const override;
+	bool OnCharacterSpawn(CCharacter *pChr) override;
+	void OnPlayerLeave(int ClientID, bool Disconnect = false, bool Shutdown = false) override;
+	bool OnInput(CCharacter *pChr, CNetObj_PlayerInput *pNewInput) override;
+	void OnCharacterDie(CCharacter *pChr, int Killer = WEAPON_GAME) override;
+	void OnPlayerJoin(int ClientID) override;
 
 	void Reset(int ClientID);
 	int GetClientFight(int ClientID, bool HasToBeJoined = true);
@@ -137,15 +149,10 @@ public:
 
 	bool IsConfiguring(int ClientID) { return m_aState[ClientID] != STATE_1VS1_NONE && m_aState[ClientID] != STATE_1VS1_DONE; }
 	bool HasJoined(int Fight, int Index) { return m_aFights[Fight].m_aParticipants[Index].m_Status == PARTICIPANT_OWNER || m_aFights[Fight].m_aParticipants[Index].m_Status == PARTICIPANT_ACCEPTED; }
-
-	bool OnCharacterSpawn(int ClientID);
-	void OnPlayerLeave(int ClientID, bool Disconnect = false);
-	void OnPlayerDie(int ClientID);
-	void OnInput(int ClientID, CNetObj_PlayerInput *pNewInput);
 	bool ClampViewPos(int ClientID);
 
-	void StartConfiguration(int ClientID, int Participant, int ScoreLimit, bool KillBorder);
-	bool AcceptFight(int Creator, int ClientID);
+	void StartConfiguration(int ClientID, int Participant, int64 Stake, int ScoreLimit, bool KillBorder);
+	bool AcceptFight(int Creator, int ClientID, int64 Stake);
 	void EndFight(int Fight);
 
 	bool GlobalArenaExists() { return m_GlobalArena.m_Active; }

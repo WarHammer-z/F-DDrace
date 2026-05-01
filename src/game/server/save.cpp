@@ -21,6 +21,8 @@ void CSaveTee::TeleOutOfPlot(vec2 ToTele)
 {
 	m_Pos = m_PrevPos = m_CorePos = ToTele;
 	StopPlotEditing();
+	// in case there is a safearea tile on the plot and owner starts editing, we dont want people being outside with safe area
+	m_InSafeArea = false;
 }
 
 void CSaveTee::StopPlotEditing()
@@ -72,7 +74,7 @@ void CSaveTee::Save(CCharacter *pChr)
 	str_copy(m_aName, pChr->Server()->ClientName(pChr->GetPlayer()->GetCID()), sizeof(m_aName));
 
 	m_Alive = pChr->IsAlive();
-	m_Paused = abs(pChr->GetPlayer()->IsPaused());
+	m_Paused = absolute(pChr->GetPlayer()->IsPaused());
 
 	m_TeeFinished = pChr->Teams()->TeeFinished(pChr->GetPlayer()->GetCID());
 	m_IsSolo = pChr->IsSolo();
@@ -207,6 +209,11 @@ void CSaveTee::Save(CCharacter *pChr)
 		m_BirthdayGiftTicksLeft = pChr->m_BirthdayGiftEndTick - pChr->Server()->Tick();
 	else
 		m_BirthdayGiftTicksLeft = 0;
+	m_InSafeArea = pChr->IsInSafeArea();
+	m_HasTeleGun = pChr->m_HasTeleGun;
+	m_HasTeleGrenade = pChr->m_HasTeleGrenade;
+	m_HasTeleLaser = pChr->m_HasTeleLaser;
+	m_ProjectileHammer = pChr->m_ProjectileHammer;
 
 	// core
 	m_MoveRestrictionExtraRoomKey = pChr->Core()->m_MoveRestrictionExtra.m_RoomKey;
@@ -232,6 +239,10 @@ void CSaveTee::Save(CCharacter *pChr)
 	m_IsBirthdayGift = pChr->GetPlayer()->m_IsBirthdayGift;
 	m_TaserShield = pChr->GetPlayer()->m_TaserShield;
 	m_DoubleXpLifesLeft = pChr->GetPlayer()->m_DoubleXpLifesLeft;
+	m_SavePlayerDisconnect = pChr->GetPlayer()->m_SavePlayerDisconnect;
+	m_HighBandwidth = pChr->Server()->GetHighBandwidth(pChr->GetPlayer()->GetCID());
+	m_AntiPing = pChr->GetPlayer()->AntiPing();
+	m_HasProjectileHammer = pChr->GetPlayer()->m_HasProjectileHammer;
 
 	if (m_Flags&SAVE_IDENTITY)
 	{
@@ -394,7 +405,7 @@ void CSaveTee::Load(CCharacter *pChr, int Team)
 			CGameControllerDDRace *pController = ((CGameControllerDDRace *)pChr->GameServer()->m_pController);
 			CFlag *pFlag = pController->m_apFlags[m_CarriedFlag];
 			if (pFlag && !pFlag->GetCarrier())
-				pController->ForceFlagOwner(pChr->GetPlayer()->GetCID(), m_CarriedFlag);
+				pController->ForceFlagOwner(pChr->GetPlayer()->GetCID(), m_CarriedFlag, true);
 		}
 		pChr->m_CollectedPortalRifle = m_CollectedPortalRifle;
 		pChr->Lovely(m_Lovely, -1, true);
@@ -419,6 +430,11 @@ void CSaveTee::Load(CCharacter *pChr, int Team)
 		{
 			pChr->m_BirthdayGiftEndTick = pChr->Server()->Tick() + m_BirthdayGiftTicksLeft;
 		}
+		pChr->SetSafeArea(m_InSafeArea, true);
+		pChr->m_HasTeleGun = m_HasTeleGun;
+		pChr->m_HasTeleGrenade = m_HasTeleGrenade;
+		pChr->m_HasTeleLaser = m_HasTeleLaser;
+		pChr->m_ProjectileHammer = m_ProjectileHammer;
 
 		// core
 		pChr->Core()->m_MoveRestrictionExtra.m_RoomKey = m_MoveRestrictionExtraRoomKey;
@@ -440,14 +456,26 @@ void CSaveTee::Load(CCharacter *pChr, int Team)
 		pChr->GetPlayer()->m_IsBirthdayGift = m_IsBirthdayGift;
 		pChr->GetPlayer()->m_TaserShield = m_TaserShield;
 		pChr->GetPlayer()->m_DoubleXpLifesLeft = m_DoubleXpLifesLeft;
+		pChr->GetPlayer()->m_SavePlayerDisconnect = m_SavePlayerDisconnect;
+		pChr->GetPlayer()->SetHighBandwidth(m_HighBandwidth, true);
+		pChr->GetPlayer()->SetAntiPing(m_AntiPing, true);
+		pChr->GetPlayer()->m_HasProjectileHammer = m_HasProjectileHammer;
 	}
+
+	// Remove all hooks on us
+	pChr->GameWorld()->ReleaseHooked(pChr->GetPlayer()->GetCID());
 
 	if (m_Flags&SAVE_IDENTITY)
 	{
 		if (m_Identity.m_aAccUsername[0] != '\0')
-			pChr->GameServer()->Login(pChr->GetPlayer()->GetCID(), m_Identity.m_aAccUsername, "", false, true);
+			pChr->GameServer()->m_Accounts.Login(pChr->GetPlayer()->GetCID(), m_Identity.m_aAccUsername, "", false, true);
 		if (m_Flags&SAVE_REDIRECT)
 			pChr->LoadRedirectTile(m_PreviousPort == pChr->Config()->m_SvPort ? m_Identity.m_RedirectTilePort : m_PreviousPort);
+	}
+
+	if (m_Flags&SAVE_DISCONNECT)
+	{
+		pChr->Freeze(pChr->Config()->m_SvDisconnectSaveTeeFreeze);
 	}
 
 	pChr->GetPlayer()->m_EscapeTime = m_EscapeTime;
@@ -522,7 +550,8 @@ char* CSaveTee::GetString()
 		"%d\t%d\t%d\t%d\t%d\t%d\t"
 		"%d\t%d\t%d\t%d\t%d\t%d\t"
 		"%s\t%d\t%d\t%d\t"
-		"%s\t%d",
+		"%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t"
+		"%d\t%d\t",
 		m_aName, m_Alive, m_Paused, m_TeeFinished, m_IsSolo,
 		m_aWeapons[0].m_AmmoRegenStart, m_aWeapons[0].m_Ammo, m_aWeapons[0].m_Got,
 		m_aWeapons[1].m_AmmoRegenStart, m_aWeapons[1].m_Ammo, m_aWeapons[1].m_Got,
@@ -574,7 +603,8 @@ char* CSaveTee::GetString()
 		m_Identity.m_TeeInfo.m_aUseCustomColors[0], m_Identity.m_TeeInfo.m_aUseCustomColors[1], m_Identity.m_TeeInfo.m_aUseCustomColors[2], m_Identity.m_TeeInfo.m_aUseCustomColors[3], m_Identity.m_TeeInfo.m_aUseCustomColors[4], m_Identity.m_TeeInfo.m_aUseCustomColors[5],
 		m_Identity.m_TeeInfo.m_aSkinPartColors[0], m_Identity.m_TeeInfo.m_aSkinPartColors[1], m_Identity.m_TeeInfo.m_aSkinPartColors[2], m_Identity.m_TeeInfo.m_aSkinPartColors[3], m_Identity.m_TeeInfo.m_aSkinPartColors[4], m_Identity.m_TeeInfo.m_aSkinPartColors[5],
 		m_Identity.m_TeeInfo.m_Sevendown.m_SkinName, m_Identity.m_TeeInfo.m_Sevendown.m_UseCustomColor, m_Identity.m_TeeInfo.m_Sevendown.m_ColorBody, m_Identity.m_TeeInfo.m_Sevendown.m_ColorFeet,
-		aCheckpointList, m_BirthdayGiftTicksLeft
+		aCheckpointList, m_BirthdayGiftTicksLeft, m_InSafeArea, m_HasTeleGun, m_HasTeleGrenade, m_HasTeleLaser, m_SavePlayerDisconnect, m_HighBandwidth, m_AntiPing,
+		m_HasProjectileHammer, m_ProjectileHammer
 	);
 	return m_aString;
 }
@@ -635,7 +665,8 @@ int CSaveTee::LoadString(const char *pString)
 		"%d\t%d\t%d\t%d\t%d\t%d\t"
 		"%d\t%d\t%d\t%d\t%d\t%d\t"
 		"%[^\t]\t%d\t%d\t%d\t"
-		"%[^\t]\t%d",
+		"%[^\t]\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t"
+		"%d\t%d\t",
 		m_aName, &m_Alive, &m_Paused, &m_TeeFinished, &m_IsSolo,
 		&m_aWeapons[0].m_AmmoRegenStart, &m_aWeapons[0].m_Ammo, &m_aWeapons[0].m_Got,
 		&m_aWeapons[1].m_AmmoRegenStart, &m_aWeapons[1].m_Ammo, &m_aWeapons[1].m_Got,
@@ -687,7 +718,8 @@ int CSaveTee::LoadString(const char *pString)
 		&m_Identity.m_TeeInfo.m_aUseCustomColors[0], &m_Identity.m_TeeInfo.m_aUseCustomColors[1], &m_Identity.m_TeeInfo.m_aUseCustomColors[2], &m_Identity.m_TeeInfo.m_aUseCustomColors[3], &m_Identity.m_TeeInfo.m_aUseCustomColors[4], &m_Identity.m_TeeInfo.m_aUseCustomColors[5],
 		&m_Identity.m_TeeInfo.m_aSkinPartColors[0], &m_Identity.m_TeeInfo.m_aSkinPartColors[1], &m_Identity.m_TeeInfo.m_aSkinPartColors[2], &m_Identity.m_TeeInfo.m_aSkinPartColors[3], &m_Identity.m_TeeInfo.m_aSkinPartColors[4], &m_Identity.m_TeeInfo.m_aSkinPartColors[5],
 		m_Identity.m_TeeInfo.m_Sevendown.m_SkinName, &m_Identity.m_TeeInfo.m_Sevendown.m_UseCustomColor, &m_Identity.m_TeeInfo.m_Sevendown.m_ColorBody, &m_Identity.m_TeeInfo.m_Sevendown.m_ColorFeet,
-		aCheckpointList, &m_BirthdayGiftTicksLeft
+		aCheckpointList, &m_BirthdayGiftTicksLeft, &m_InSafeArea, &m_HasTeleGun, &m_HasTeleGrenade, &m_HasTeleLaser, &m_SavePlayerDisconnect, &m_HighBandwidth, &m_AntiPing,
+		&m_HasProjectileHammer, &m_ProjectileHammer
 	);
 
 	const char *pList = aCheckpointList;
@@ -725,7 +757,7 @@ int CSaveTee::LoadString(const char *pString)
 	{
 	case 91:
 		return 0;
-	case 254: // F-DDrace extra vars
+	case 263: // F-DDrace extra vars
 		return 0;
 	default:
 		dbg_msg("load", "failed to load tee-string");

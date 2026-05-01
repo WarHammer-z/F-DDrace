@@ -8,16 +8,17 @@
 
 #include <game/gamecore.h>
 #include <game/server/entity.h>
+#include <game/server/eventhandler.h>
 #include <game/server/player.h>
-#include <game/server/draweditor.h>
-#include <game/server/snake.h>
+#include <game/server/misc/draweditor.h>
+#include <game/server/misc/snake.h>
 
-#include "pickup.h"
-#include "lightsaber.h"
-#include "stable_projectile.h"
-#include "game/server/entities/helicopter/helicopter.h"
-#include "portalblocker.h"
-#include "grog.h"
+#include "map/pickup.h"
+#include "misc/stable_projectile.h"
+#include "weapons/lightsaber.h"
+#include "weapons/portalblocker.h"
+#include "interactive/vehicle/helicopter.h"
+#include "interactive/grog.h"
 
 #include "dummy/dummybase.h"
 
@@ -57,12 +58,14 @@ enum Extra
 	RAINBOW_NAME,
 	CONFETTI,
 	SPARKLE,
+	PROJECTILE_HAMMER,
 	NUM_EXTRAS
 };
 
 enum Backup
 {
 	BACKUP_SPOOKY_GHOST,
+	BACKUP_INGAME,
 	NUM_BACKUPS
 };
 
@@ -73,6 +76,7 @@ enum WeaponSpecial
 	SPECIAL_TELEWEAPON = 1<<2,
 	SPECIAL_DOORHAMMER = 1<<3,
 	SPECIAL_SCROLLNINJA = 1<<4,
+	SPECIAL_PPROJECTILEHAMMER = 1<<5,
 };
 
 class CAntibot;
@@ -103,7 +107,7 @@ public:
 	bool CanSnapCharacter(int SnappingClient);
 	bool IsSnappingCharacterInView(int SnappingClientId);
 
-	bool IsGrounded(bool CheckDoor = false);
+	bool IsGrounded(bool CheckDoor = false, bool SetDrawTilePred = false);
 
 	void SetWeapon(int W);
 	void SetSolo(bool Solo);
@@ -177,8 +181,9 @@ public:
 	void Invisible(bool Set = true, int FromID = -1, bool Silent = false);
 	void Item(int Item, int FromID = -1, bool Silent = false);
 	void TeleWeapon(int Type, bool Set = true, int FromID = -1, bool Silent = false);
-	void AlwaysTeleWeapon(bool Set = true, int FromID = -1, bool Silent = false);
+	void AlwaysTeleWeapon(int Mode = 1, int FromID = -1, bool Silent = false);
 	void DoorHammer(bool Set = true, int FromID = -1, bool Silent = false);
+	void ProjectileHammer(bool Set = true, int FromID = -1, bool Silent = false);
 	void TeeControl(bool Set = true, int ForcedID = -1, int FromID = -1, bool Silent = false);
 	void Snake(bool Set = true, int FromID = -1, bool Silent = false);
 	void Lovely(bool Set = true, int FromID = -1, bool Silent = false);
@@ -257,7 +262,7 @@ private:
 	int m_Health;
 	int m_Armor;
 
-	int m_TriggeredEvents;
+	int m_TriggeredEvents[CEventHandler::NUM_BUFFERS];
 
 	// ninja
 	struct
@@ -280,6 +285,7 @@ private:
 
 	static bool IsSwitchActiveCb(int Number, void *pUser);
 	void HandleTiles(int Index);
+	int CheckMaskableTile(int TileIndex, bool CurrentState);
 	float m_Time;
 	int m_LastBroadcast;
 	void DDraceInit();
@@ -315,7 +321,7 @@ public:
 	int Team();
 	Mask128 TeamMask(bool SevendownOnly = false);
 	Mask128 TeamMaskExceptSelf(bool SevendownOnly = false);
-	bool CanCollide(int ClientID, bool CheckPassive = true);
+	bool CanCollide(int ClientID, bool CheckPassive = true, bool CheckInGame = true);
 	bool SameTeam(int ClientID);
 	bool m_Super;
 	bool m_SuperJump;
@@ -367,14 +373,14 @@ public:
 	bool m_HasTeleGrenade;
 	bool m_HasTeleLaser;
 	vec2 m_TeleGunPos;
-	bool m_TeleGunTeleport;
+	int m_TeleGunTeleportType;
 	bool m_IsBlueTeleGunTeleport;
 	int m_StrongWeakID;
 
 	// Setters/Getters because i don't want to modify vanilla vars access modifiers
 	int GetLastWeapon() { return m_LastWeapon; };
 	void SetLastWeapon(int LastWeap) { m_LastWeapon = LastWeap; };
-	int GetActiveWeapon() { return max(0, m_ActiveWeapon); };
+	int GetActiveWeapon() { return maximum(0, m_ActiveWeapon); };
 	int GetActiveWeaponUnclamped() { return m_ActiveWeapon; };
 	void SetActiveWeapon(int Weapon);
 	void SetLastAction(int LastAction) { m_LastAction = LastAction; };
@@ -398,6 +404,7 @@ public:
 	void SetNinjaActivationDir(vec2 ActivationDir) { m_Ninja.m_ActivationDir = ActivationDir; };
 	void SetNinjaActivationTick(int ActivationTick) { m_Ninja.m_ActivationTick = ActivationTick; };
 	void SetNinjaCurrentMoveTime(int CurrentMoveTime) { m_Ninja.m_CurrentMoveTime = CurrentMoveTime; };
+	int GetNinjaCurrentMoveTime() { return m_Ninja.m_CurrentMoveTime; };
 	void SetAlive(bool Alive) { m_Alive = Alive; }
 
 	void SetPos(vec2 Pos) { m_Pos = Pos; };
@@ -452,8 +459,9 @@ public:
 	bool m_aSpreadWeapon[NUM_WEAPONS];
 	CEntity* m_pTelekinesisEntity;
 	CLightsaber* m_pLightsaber;
-	bool m_AlwaysTeleWeapon;
+	int m_AlwaysTeleWeapon;
 	bool m_DoorHammer;
+	bool m_ProjectileHammer;
 	bool m_FakeTuneCollision;
 	bool m_OldFakeTuneCollision;
 	bool m_Passive;
@@ -480,6 +488,12 @@ public:
 	bool m_EpicCircle;
 	bool m_StaffInd;
 	bool m_Confetti;
+
+	bool IsActiveProjectileHammer();
+	int m_AntiPingPreventPredictEventUntil;
+	void DisablePreventEventPredict() { m_AntiPingPreventPredictEventUntil = 0; }
+	void PreventEventPrediction();
+	bool IsPreventEventPredict();
 
 	void ResetOnlyFirstPortal();
 	int64 m_LastLinkedPortals;
@@ -537,9 +551,15 @@ public:
 	int m_LastJumpedTotal;
 	int64 m_HookExceededTick;
 
+	bool HasTeleWeapon(int Type);
+	bool ShouldRemoveTeleProjLaser(bool IsTeleWeapon, bool InitialTeleWeapon, bool InitialSafeArea, bool InitialNoBonusArea);
+
 	// helicopter
-	CHelicopter *m_pHelicopter;
-	bool TryMountHelicopter();
+	IVehicle *m_pVehicle;
+	int m_VehicleSeat;
+	int m_SeatSwitchedTick;
+	bool TryMountVehicle();
+	bool CanSwitchSeats();
 
 	int GetCurrentTilePlotID(bool CheckDoor = false);
 	void TeleOutOfPlot(int PlotID);
@@ -622,9 +642,29 @@ public:
 	int64 m_BirthdayGiftEndTick;
 	int64 m_LastBirthdayMsg;
 	bool m_IsZombie;
-	bool SetZombieHuman(bool Zombie, bool GiveGun = true);
+	bool SetZombieHuman(bool Zombie, int HitHumanID = -1, bool Silent = false);
 	bool TryHumanTransformation(CCharacter *pTarget);
 	void SetBirthdayJetpack(bool Set);
+	bool SetSafeArea(bool Enter, bool Silent = false);
+	int64 m_LastSetInGame;
+	struct SInGameSave
+	{
+		bool NonEmpty()
+		{
+			return m_IsZombie || m_EndlessHook || m_InfiniteJumps || m_Jetpack || m_Jumps != 2;
+		}
+		bool m_IsZombie = false;
+		bool m_EndlessHook = false;
+		bool m_InfiniteJumps = false;
+		bool m_Jetpack = false;
+		int m_Jumps = 2;
+		bool m_aSpawnWeaponActive[3] = { 0, 0, 0 };
+
+	} m_SavedInGame;
+	bool IsInSafeArea();
+	void SetInGame(bool Set);
+
+	bool TryInitializeSpawnWeapons(bool Spawn = false);
 
 	// broadcast and ddrace hud
 	bool ShowAmmoHud();
@@ -686,6 +726,11 @@ public:
 	CNetObj_PlayerInput *Input() { return &m_Input; };
 	CNetObj_PlayerInput *LatestInput() { return &m_LatestInput; };
 	int GetReloadTimer() { return m_ReloadTimer; }
+
+	// AntiPing
+	// https://github.com/ddnet/ddnet/blob/bca9a344dd257c62dc337d7e199213b43c15dde2/src/game/client/prediction/entities/character.cpp#L1501
+	// Dont show hammer as activeweapon
+	int m_AntiPingHideHammerTicks;
 
 	// Handles dummymode stuff
 	void CreateDummyHandle(int Dummymode);

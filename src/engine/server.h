@@ -55,6 +55,10 @@ public:
 	virtual void GetClientAddr(int ClientID, NETADDR* pAddr) = 0;
 	virtual const char* GetAnnouncementLine(char const* FileName) = 0;
 
+	virtual bool DnsblWhite(int ClientId) = 0;
+	virtual bool DnsblPending(int ClientId) = 0;
+	virtual bool DnsblBlack(int ClientId) = 0;
+
 	virtual void SendWebhookMessage(const char *pURL, const char *pMessage, const char *pUsername = "", const char *pAvatarURL = "") = 0;
 
 	virtual const char *GetAuthIdent(int ClientID) = 0;
@@ -79,16 +83,20 @@ public:
 	virtual const char *GetMapDesignName(int Design) = 0;
 	virtual void LoadMapDesigns() = 0;
 
+	virtual void SetHighBandwidth(int ClientID, bool Value) = 0;
+	virtual bool GetHighBandwidth(int ClientID) = 0;
+
 	virtual void PrintBotLookup() = 0;
 	virtual void CountryLookup(int ClientID) = 0;
 	virtual void TranslateChat(int ClientID, const char *pMsg, int Mode) = 0;
 	virtual const char *GetCountryCode(int ClientID) = 0;
 
-	virtual void SaveWhitelist() = 0;
+	virtual void SaveWhitelist(const char *pFilename) = 0;
 	virtual void AddWhitelist(const NETADDR *pAddr, const char *pReason) = 0;
 	virtual void RemoveWhitelist(const NETADDR *pAddr) = 0;
 	virtual void RemoveWhitelistByIndex(unsigned int Index) = 0;
 	virtual void PrintWhitelist() = 0;
+	virtual bool IsWhitelisted(int ClientID) = 0;
 
 	virtual bool IsUniqueAddress(int ClientID) = 0;
 	virtual int GetDummy(int ClientID) = 0;
@@ -281,6 +289,8 @@ public:
 	virtual void SendRedirectSaveTeeAdd(int Port, const char *pHash) = 0;
 	virtual void SendRedirectSaveTeeRemove(int Port, const char *pHash) = 0;
 	virtual void SendPlayerCountUpdate(bool Shutdown = false) = 0;
+	virtual bool SendWhitelistUpdate() = 0;
+	virtual bool SendBansUpdate() = 0;
 
 	virtual void SendMsgRaw(int ClientID, const void *pData, int Size, int Flags) = 0;
 
@@ -299,7 +309,6 @@ class IGameServer : public IInterface
 protected:
 public:
 	virtual void OnInit() = 0;
-	virtual void OnMapChange(char* pNewMapName, int MapNameSize) = 0;
 	virtual void OnConsoleInit() = 0;
 	virtual void OnShutdown(bool FullShutdown = false) = 0;
 	virtual void OnPreShutdown() = 0;
@@ -322,13 +331,15 @@ public:
 	virtual void OnClientPredictedEarlyInput(int ClientID, void *pInput) = 0;
 	virtual void OnClientRejoin(int ClientID) = 0;
 
+	virtual void PreInputClients(int ClientId, bool *pClients) = 0;
+
 	virtual bool IsClientBot(int ClientID) const = 0;
 	virtual bool IsClientReady(int ClientID) const = 0;
 	virtual bool IsClientPlayer(int ClientID) const = 0;
 	virtual bool IsClientSpectator(int ClientID) const = 0;
 
 	virtual void SendChatMessage(int ChatterClientID, int Mode, int To, const char *pText) = 0;
-	virtual void SendModLogMessage(int ClientID, const char *pMsg) = 0;
+	virtual void SendModLogMessage(int ClientID, const char *pMsg, bool IsAuth = false) = 0;
 
 	virtual void OnRedirectSaveTeeAdd(const char *pHash) = 0;
 	virtual void OnRedirectSaveTeeRemove(const char *pHash) = 0;

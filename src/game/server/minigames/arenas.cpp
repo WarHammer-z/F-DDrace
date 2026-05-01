@@ -6,7 +6,7 @@
 #include <engine/shared/config.h>
 #include <game/server/gamemodes/DDRace.h>
 
-CArenas::CArenas(CGameContext *pGameServer, int Type) : CMinigame(pGameServer, Type)
+CArenas::CArenas(CGameContext *pGameServer) : CMinigame(pGameServer, MINIGAME_1VS1)
 {
 	for (int i = 0; i < MAX_CLIENTS; i++)
 		Reset(i);
@@ -112,6 +112,12 @@ int CArenas::GetClientScore(int ClientID)
 	return m_aFights[Fight].m_aParticipants[Index].m_Score;
 }
 
+int CArenas::SpawnIndex(int ClientID) const
+{
+	// using GetSpawnPos during round
+	return TILE_1VS1_LOBBY;
+}
+
 vec2 CArenas::GetSpawnPos(int ClientID)
 {
 	int Fight = GetClientFight(ClientID);
@@ -122,7 +128,14 @@ vec2 CArenas::GetSpawnPos(int ClientID)
 	return m_aFights[Fight].m_aSpawns[Index];
 }
 
-void CArenas::StartConfiguration(int ClientID, int Participant, int ScoreLimit, bool KillBorder)
+bool CArenas::CanPayStake(int ClientID, int64 Stake)
+{
+	int AccID = GameServer()->m_apPlayers[ClientID]->GetAccID();
+	int64 Money = AccID >= ACC_START ? GameServer()->m_Accounts.Get(AccID).m_Money : GameServer()->m_apPlayers[ClientID]->GetWalletMoney();
+	return Money >= Stake;
+}
+
+void CArenas::StartConfiguration(int ClientID, int Participant, int64 Stake, int ScoreLimit, bool KillBorder)
 {
 	if (ClientID == Participant)
 	{
@@ -142,6 +155,18 @@ void CArenas::StartConfiguration(int ClientID, int Participant, int ScoreLimit, 
 		return;
 	}
 
+	if (Stake < 0 || Stake > MAX_ARENAS_STAKE)
+	{
+		GameServer()->SendChatTarget(ClientID, GameServer()->m_apPlayers[ClientID]->Localize("Invalid stake, please enter a value between 0 and 10.000.000"));
+		return;
+	}
+
+	if (Stake > 0 && !CanPayStake(ClientID, Stake))
+	{
+		GameServer()->SendChatTarget(ClientID, GameServer()->m_apPlayers[ClientID]->Localize("You don't have enough money"));
+		return;
+	}
+
 	int FreeArena = GetFreeArena();
 	if (FreeArena == -1)
 	{
@@ -150,6 +175,7 @@ void CArenas::StartConfiguration(int ClientID, int Participant, int ScoreLimit, 
 	}
 
 	m_aFights[FreeArena].m_Active = true;
+	m_aFights[FreeArena].m_Stake = Stake;
 	m_aFights[FreeArena].m_ScoreLimit = clamp(ScoreLimit, 0, 100);
 	m_aFights[FreeArena].m_KillBorder = KillBorder;
 
@@ -236,7 +262,16 @@ void CArenas::FinishConfiguration(int Fight, int ClientID)
 		str_format(aBuf, sizeof(aBuf), GameServer()->m_apPlayers[ClientID]->Localize("You invited '%s' to a fight"), Server()->ClientName(Invited));
 		GameServer()->SendChatTarget(ClientID, aBuf);
 
-		str_format(aBuf, sizeof(aBuf), GameServer()->m_apPlayers[Invited]->Localize("You have been invited to a fight by '%s', type '/1vs1 %s' to join"), Server()->ClientName(ClientID), Server()->ClientName(ClientID));
+		char aParameters[128];
+		str_format(aParameters, sizeof(aParameters), "%s", Server()->ClientName(ClientID));
+		if (m_aFights[Fight].m_Stake)
+		{
+			char aTemp[128];
+			str_format(aTemp, sizeof(aTemp), " %lld", m_aFights[Fight].m_Stake);
+			str_append(aParameters, aTemp, sizeof(aParameters));
+		}
+
+		str_format(aBuf, sizeof(aBuf), GameServer()->m_apPlayers[Invited]->Localize("You have been invited to a fight by '%s', type '/1vs1 %s' to join"), Server()->ClientName(ClientID), aParameters);
 		GameServer()->SendChatTarget(Invited, aBuf);
 
 		if (GameServer()->m_apPlayers[Invited] && GameServer()->m_apPlayers[Invited]->m_Minigame != MINIGAME_1VS1)
@@ -244,8 +279,12 @@ void CArenas::FinishConfiguration(int Fight, int ClientID)
 	}
 }
 
-void CArenas::OnInput(int ClientID, CNetObj_PlayerInput *pNewInput)
+bool CArenas::OnInput(CCharacter *pChr, CNetObj_PlayerInput *pNewInput)
 {
+	int ClientID = pChr->GetPlayer()->GetCID();
+	if (!IsConfiguring(ClientID))
+		return false;
+
 	if (pNewInput->m_Jump && m_aLastJump[ClientID] == 0)
 	{
 		switch (m_aState[ClientID])
@@ -271,6 +310,7 @@ void CArenas::OnInput(int ClientID, CNetObj_PlayerInput *pNewInput)
 
 	m_aLastJump[ClientID] = pNewInput->m_Jump;
 	m_aLastDirection[ClientID] = pNewInput->m_Direction;
+	return true;
 }
 
 bool CArenas::ValidSpawnPos(vec2 Pos)
@@ -394,7 +434,7 @@ bool CArenas::ClampViewPos(int ClientID)
 	return Clamp;
 }
 
-bool CArenas::AcceptFight(int Creator, int ClientID)
+bool CArenas::AcceptFight(int Creator, int ClientID, int64 Stake)
 {
 	int Fight = GetClientFight(Creator);
 	if (Fight < 0)
@@ -411,11 +451,12 @@ bool CArenas::AcceptFight(int Creator, int ClientID)
 
 	CFight *pFight = &m_aFights[Fight];
 	bool Found = false;
+	int OwnSlot = -1;
 	for (int i = 0; i < 2; i++)
 	{
 		if (pFight->m_aParticipants[i].m_ClientID == ClientID && pFight->m_aParticipants[i].m_Status == PARTICIPANT_INVITED)
 		{
-			pFight->m_aParticipants[i].m_Status = PARTICIPANT_ACCEPTED;
+			OwnSlot = i;
 			Found = true;
 			break;
 		}
@@ -425,6 +466,29 @@ bool CArenas::AcceptFight(int Creator, int ClientID)
 		return false;
 
 	char aBuf[128];
+	if (pFight->m_Stake)
+	{
+		if (Stake != pFight->m_Stake)
+		{
+			str_format(aBuf, sizeof(aBuf), GameServer()->m_apPlayers[ClientID]->Localize("This fight requires a stake of %lld money. Accept by typing '/1vs1 %s %lld'"), pFight->m_Stake, Server()->ClientName(Creator), pFight->m_Stake);
+			GameServer()->SendChatTarget(ClientID, aBuf);
+			return true; // dont process further
+		}
+
+		if (!CanPayStake(ClientID, Stake) || !CanPayStake(Creator, Stake))
+		{
+			GameServer()->SendChatTarget(ClientID, GameServer()->m_apPlayers[ClientID]->Localize("Fight cancelled, someone couldn't pay the stake."));
+			GameServer()->SendChatTarget(Creator, GameServer()->m_apPlayers[Creator]->Localize("Fight cancelled, someone couldn't pay the stake."));
+			EndFight(Fight);
+			return true; // dont process further
+		}
+
+		GameServer()->m_apPlayers[ClientID]->BankOrWalletTransaction(-Stake, "collected 1vs1 stake");
+		GameServer()->m_apPlayers[Creator]->BankOrWalletTransaction(-Stake, "collected 1vs1 stake");
+	}
+
+	pFight->m_aParticipants[OwnSlot].m_Status = PARTICIPANT_ACCEPTED;
+
 	str_format(aBuf, sizeof(aBuf), GameServer()->m_apPlayers[ClientID]->Localize("You have accepted the invite by '%s'"), Server()->ClientName(Creator));
 	GameServer()->SendChatTarget(ClientID, aBuf);
 
@@ -495,6 +559,7 @@ void CArenas::StartFight(int Fight)
 		if (GameServer()->m_apPlayers[aID[i]])
 			GameServer()->m_apPlayers[aID[i]]->SetPlaying();
 	}
+	((CGameControllerDDRace *)GameServer()->m_pController)->m_Teams.SetTeamLock(FirstFreeTeam, true);
 }
 
 const char *CArenas::StartGlobalArenaFight(int ClientID1, int ClientID2)
@@ -618,20 +683,31 @@ void CArenas::IncreaseScore(int Fight, int Index)
 			m_aFights[Fight].m_aParticipants[Index].m_Score, m_aFights[Fight].m_aParticipants[Other].m_Score);
 
 		Server()->SendWebhookMessage(GameServer()->Config()->m_SvWebhook1vs1URL, aBuf, GameServer()->Config()->m_SvWebhook1vs1Name, GameServer()->Config()->m_SvWebhook1vs1AvatarURL);
-		GameServer()->m_apPlayers[ClientID]->m_ConfettiWinEffectTick = Server()->Tick();
 
+		ProcessPlayerWin(ClientID, m_aFights[Fight].m_Stake);
 		EndFight(Fight);
 	}
 }
 
-bool CArenas::OnCharacterSpawn(int ClientID)
+void CArenas::ProcessPlayerWin(int ClientID, int64 Stake)
 {
+	GameServer()->m_apPlayers[ClientID]->m_ConfettiWinEffectTick = Server()->Tick();
+
+	int64 Earnings = Stake * 2;
+	if (Earnings <= 0)
+		return;
+
+	char aBuf[128];
+	GameServer()->m_apPlayers[ClientID]->BankOrWalletTransaction(Earnings, "won 1vs1 round");
+	str_format(aBuf, sizeof(aBuf), GameServer()->m_apPlayers[ClientID]->Localize("You won this 1vs1 round! Your earnings: +%lld money."), Earnings);
+	GameServer()->SendChatTarget(ClientID, aBuf);
+}
+
+bool CArenas::OnCharacterSpawn(CCharacter *pChr)
+{
+	int ClientID = pChr->GetPlayer()->GetCID();
 	int Fight = GetClientFight(ClientID);
 	if (Fight < 0 || !FightStarted(ClientID))
-		return false;
-
-	CCharacter *pChr = GameServer()->GetPlayerChar(ClientID);
-	if (!pChr)
 		return false;
 
 	pChr->GiveWeapon(WEAPON_GUN);
@@ -645,7 +721,14 @@ bool CArenas::OnCharacterSpawn(int ClientID)
 	return true;
 }
 
-void CArenas::OnPlayerLeave(int ClientID, bool Disconnect)
+void CArenas::OnPlayerJoin(int ClientID)
+{
+	CPlayer *pPlayer = GameServer()->m_apPlayers[ClientID];
+	GameServer()->SendChatTarget(ClientID, pPlayer->Localize("Type '/1vs1 <playername>' to start a fight with someone"));
+	GameServer()->SendChatTarget(ClientID, pPlayer->Localize("For a stake, custom scorelimits or a kill-border use '/1vs1 <playername> <stake> <scorelimit> <killborder>'"));
+}
+
+void CArenas::OnPlayerLeave(int ClientID, bool Disconnect, bool Shutdown)
 {
 	int Fight;
 	while ((Fight = GetClientFight(ClientID, !Disconnect)) >= 0)
@@ -665,7 +748,8 @@ void CArenas::OnPlayerLeave(int ClientID, bool Disconnect)
 			GameServer()->SendChatFormat(-1, CHAT_ALL, -1, CGameContext::CHATFLAG_ALL, aFormat, Server()->ClientName(ClientID), Server()->ClientName(OtherID),
 				m_aFights[Fight].m_aParticipants[Index].m_Score, m_aFights[Fight].m_aParticipants[Other].m_Score);
 
-			if(FightScore > 0 || OtherScore > 0)
+			bool AnyPoints = FightScore > 0 || OtherScore > 0;
+			if(AnyPoints)
 			{
 				// Then fill untranslated format
 				char aBuf[128];
@@ -673,15 +757,27 @@ void CArenas::OnPlayerLeave(int ClientID, bool Disconnect)
 					m_aFights[Fight].m_aParticipants[Index].m_Score, m_aFights[Fight].m_aParticipants[Other].m_Score);
 				Server()->SendWebhookMessage(GameServer()->Config()->m_SvWebhook1vs1URL, aBuf, GameServer()->Config()->m_SvWebhook1vs1Name, GameServer()->Config()->m_SvWebhook1vs1AvatarURL);
 			}
-			GameServer()->m_apPlayers[OtherID]->m_ConfettiWinEffectTick = Server()->Tick();
+
+			if (AnyPoints && !Shutdown)
+			{
+				// only process win when at least one point was given and server is not shutting down
+				ProcessPlayerWin(OtherID, m_aFights[Fight].m_Stake);
+			}
+			else
+			{
+				// otherwise, no point or shutdown, give back stake
+				GameServer()->m_apPlayers[ClientID]->BankOrWalletTransaction(m_aFights[Fight].m_Stake, "return 1vs1 stake");
+				GameServer()->m_apPlayers[OtherID]->BankOrWalletTransaction(m_aFights[Fight].m_Stake, "return 1vs1 stake");
+			}
 		}
 
 		EndFight(Fight);
 	}
 }
 
-void CArenas::OnPlayerDie(int ClientID)
+void CArenas::OnCharacterDie(CCharacter *pChr, int Killer)
 {
+	int ClientID = pChr->GetPlayer()->GetCID();
 	int Fight = GetClientFight(ClientID);
 	if (Fight < 0)
 		return;
@@ -692,11 +788,11 @@ void CArenas::OnPlayerDie(int ClientID)
 
 	IncreaseScore(Fight, Other);
 
-	CCharacter *pChr = GameServer()->GetPlayerChar(m_aFights[Fight].m_aParticipants[Other].m_ClientID);
-	if (pChr)
+	CCharacter *pOther = GameServer()->GetPlayerChar(m_aFights[Fight].m_aParticipants[Other].m_ClientID);
+	if (pOther)
 	{
-		pChr->Die(WEAPON_GAME, true, false);
-		pChr->GetPlayer()->Respawn();
+		pOther->Die(WEAPON_GAME, true, false);
+		pOther->GetPlayer()->Respawn();
 	}
 }
 
@@ -712,8 +808,10 @@ void CArenas::Tick()
 		{
 			int ClientID = pFight->m_aParticipants[i].m_ClientID;
 			CCharacter *pChr = GameServer()->GetPlayerChar(ClientID);
+			if (!pChr) // PARTICIPANT_GLOBAL
+				continue;
 
-			if (HasJoined(f, i) && FightStarted(ClientID) && pChr)
+			if (HasJoined(f, i) && FightStarted(ClientID))
 			{
 				int Other = i == 0 ? 1 : 0;
 				if (!pChr->m_Super && !IsInArena(f, pChr->GetPos()))
@@ -779,18 +877,13 @@ void CArenas::Snap(int SnappingClient)
 
 	CFight *pFight = &m_aFights[Fight];
 
+	int SnappingClientVersion = GameServer()->GetClientDDNetVersion(SnappingClient);
+	CSnapContext Context(SnappingClientVersion, Server()->IsSevendown(SnappingClient), SnappingClient);
+
 	for (int i = 0; i < 4; i++)
 	{
-		CNetObj_Laser *pObj = static_cast<CNetObj_Laser *>(Server()->SnapNewItem(NETOBJTYPE_LASER, m_IDs.m_aBorder[i], sizeof(CNetObj_Laser)));
-		if (!pObj)
-			return;
-
 		int To = i == POINT_BOTTOM_LEFT ? POINT_TOP_LEFT : i+1;
-		pObj->m_X = round_to_int(pFight->m_aCorners[i].x);
-		pObj->m_Y = round_to_int(pFight->m_aCorners[i].y);
-		pObj->m_FromX = round_to_int(pFight->m_aCorners[To].x);
-		pObj->m_FromY = round_to_int(pFight->m_aCorners[To].y);
-		pObj->m_StartTick = Server()->Tick();
+		GameServer()->SnapLaserObject(Context, m_IDs.m_aBorder[i], pFight->m_aCorners[i], pFight->m_aCorners[To], Server()->Tick(), -1, LASERTYPE_RIFLE, -1, -1, LASERFLAG_NO_PREDICT);
 	}
 
 	if (!IsConfiguring(SnappingClient))
@@ -800,15 +893,7 @@ void CArenas::Snap(int SnappingClient)
 	{
 		if (pFight->m_aSpawns[i] != vec2(-1, -1))
 		{
-			CNetObj_Laser *pObj = static_cast<CNetObj_Laser *>(Server()->SnapNewItem(NETOBJTYPE_LASER, m_IDs.m_aSpawn[i], sizeof(CNetObj_Laser)));
-			if (!pObj)
-				return;
-
-			pObj->m_X = round_to_int(pFight->m_aSpawns[i].x);
-			pObj->m_Y = round_to_int(pFight->m_aSpawns[i].y);
-			pObj->m_FromX = round_to_int(pFight->m_aSpawns[i].x);
-			pObj->m_FromY = round_to_int(pFight->m_aSpawns[i].y);
-			pObj->m_StartTick = Server()->Tick();
+			GameServer()->SnapLaserObject(Context, m_IDs.m_aSpawn[i], pFight->m_aSpawns[i], pFight->m_aSpawns[i], Server()->Tick(), -1, LASERTYPE_RIFLE, -1, -1, LASERFLAG_NO_PREDICT);
 		}
 	}
 
@@ -819,22 +904,9 @@ void CArenas::Snap(int SnappingClient)
 	vec2 aBox[4] = { vec2(Pos.x-64, Pos.y-32), vec2(Pos.x+64, Pos.y-32), vec2(Pos.x+64, Pos.y+32), vec2(Pos.x-64, Pos.y+32) };
 	for (int i = 0; i < 4; i++)
 	{
-		CNetObj_Laser *pObj = static_cast<CNetObj_Laser *>(Server()->SnapNewItem(NETOBJTYPE_LASER, m_IDs.m_aWeaponBox[i], sizeof(CNetObj_Laser)));
-		if (!pObj)
-			return;
-
 		int To = i == POINT_BOTTOM_LEFT ? POINT_TOP_LEFT : i+1;
-		pObj->m_X = round_to_int(aBox[i].x);
-		pObj->m_Y = round_to_int(aBox[i].y);
-		pObj->m_FromX = round_to_int(aBox[To].x);
-		pObj->m_FromY = round_to_int(aBox[To].y);
-		pObj->m_StartTick = Server()->Tick()-2;
+		GameServer()->SnapLaserObject(Context, m_IDs.m_aWeaponBox[i], aBox[i], aBox[To], Server()->Tick()-2, -1, LASERTYPE_RIFLE, -1, -1, LASERFLAG_NO_PREDICT);
 	}
-
-	int Size = Server()->IsSevendown(SnappingClient) ? 4*4 : sizeof(CNetObj_Pickup);
-	CNetObj_Pickup *pPickup = static_cast<CNetObj_Pickup*>(Server()->SnapNewItem(NETOBJTYPE_PICKUP, m_IDs.m_SelectedWeapon, Size));
-	if (!pPickup)
-		return;
 
 	int Type = POWERUP_WEAPON;
 	int Subtype = 0;
@@ -847,15 +919,7 @@ void CArenas::Snap(int SnappingClient)
 	case 3: Subtype = WEAPON_LASER; break;
 	}
 
-	pPickup->m_X = round_to_int(Pos.x);
-	pPickup->m_Y = round_to_int(Pos.y);
-	if (Server()->IsSevendown(SnappingClient))
-	{
-		pPickup->m_Type = Type;
-		((int*)pPickup)[3] = Subtype;
-	}
-	else
-		pPickup->m_Type = GameServer()->GetPickupType(Type, Subtype);
+	GameServer()->SnapPickupObject(Context, m_IDs.m_SelectedWeapon, Pos, Type, Subtype, -1, PICKUPFLAG_NO_PREDICT);
 
 	// activated
 	if (((Subtype == WEAPON_HAMMER && Type == POWERUP_WEAPON) && pFight->m_Weapons.m_Hammer)
@@ -863,19 +927,8 @@ void CArenas::Snap(int SnappingClient)
 		|| (Subtype == WEAPON_GRENADE && pFight->m_Weapons.m_Grenade)
 		|| (Subtype == WEAPON_LASER && pFight->m_Weapons.m_Laser))
 	{
-		CNetObj_Pickup *pShield = static_cast<CNetObj_Pickup*>(Server()->SnapNewItem(NETOBJTYPE_PICKUP, m_IDs.m_WeaponActivated, Size));
-		if (!pShield)
-			return;
-
-		pShield->m_X = round_to_int(Pos.x);
-		pShield->m_Y = round_to_int(Pos.y - 64);
-		if (Server()->IsSevendown(SnappingClient))
-		{
-			pShield->m_Type = POWERUP_ARMOR;
-			((int*)pShield)[3] = 0;
-		}
-		else
-			pShield->m_Type = PICKUP_ARMOR;
+		vec2 IndPos = vec2(Pos.x, Pos.y - 64.f);
+		GameServer()->SnapPickupObject(Context, m_IDs.m_WeaponActivated, IndPos, POWERUP_ARMOR, 0, -1, PICKUPFLAG_NO_PREDICT);
 	}
 }
 

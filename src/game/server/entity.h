@@ -7,6 +7,7 @@
 
 #include "alloc.h"
 #include "gameworld.h"
+#include "misc/mask128.h"
 
 /*
 	Class: Entity
@@ -58,20 +59,21 @@ public:
 	virtual ~CEntity();
 
 	/* Objects */
-	class CGameWorld *GameWorld()		{ return m_pGameWorld; }
-	class CConfig *Config()				{ return m_pGameWorld->Config(); }
-	class CGameContext *GameServer()	{ return m_pGameWorld->GameServer(); }
-	class IServer *Server()				{ return m_pGameWorld->Server(); }
+	class CGameWorld *GameWorld()		    { return m_pGameWorld; }
+	class CConfig *Config()				    { return m_pGameWorld->Config(); }
+	class CGameContext *GameServer()	    { return m_pGameWorld->GameServer(); }
+	class IServer *Server()				    { return m_pGameWorld->Server(); }
 
 	/* Getters */
-	CEntity *TypeNext()					{ return m_pNextTypeEntity; }
-	CEntity *TypePrev()					{ return m_pPrevTypeEntity; }
-	const vec2 &GetPos() const			{ return m_Pos; }
-	float GetProximityRadius() const	{ return m_ProximityRadius; }
-	bool IsMarkedForDestroy() const		{ return m_MarkedForDestroy; }
+	CEntity *TypeNext()					     { return m_pNextTypeEntity; }
+	CEntity *TypePrev()					     { return m_pPrevTypeEntity; }
+	const vec2 &GetPos() const			     { return m_Pos; }
+	float GetProximityRadius() const	     { return m_ProximityRadius; }
+	bool IsMarkedForDestroy() const		     { return m_MarkedForDestroy; }
 
 	/* Setters */
-	void MarkForDestroy()				{ m_MarkedForDestroy = true; }
+	void MarkForDestroy()				     { m_MarkedForDestroy = true; }
+	void SetProximityRadius(float NewRadius) { m_ProximityRadius = NewRadius; }
 
 	/* Other functions */
 
@@ -138,7 +140,7 @@ public:
 	*/
 	bool NetworkClipped(int SnappingClient, bool CheckShowAll = false, bool DefaultRange = false);
 	bool NetworkClipped(int SnappingClient, vec2 CheckPos, bool CheckShowAll = false, bool DefaultRange = false);
-	bool NetworkClippedLine(int SnappingClient, vec2 StartPos, vec2 EndPos, bool CheckShowAll = false);
+	bool NetworkClippedLine(int SnappingClient, vec2 StartPos, vec2 EndPos, bool CheckShowAll = false, bool DefaultRange = false);
 
 	bool GameLayerClipped(vec2 CheckPos);
 
@@ -152,7 +154,7 @@ public:
 
 	int GetObjType() { return m_ObjType; };
 	bool IsAdvancedEntity();
-	void SetPos(vec2 Pos) { m_Pos = Pos; }
+	virtual void SetPos(vec2 Pos) { m_Pos = Pos; }
 
 	// used for entities inside of plots, created by the draw editor. if not on a plot but still from the editor, its 0, if not an object from editor its -1
 	int m_PlotID;
@@ -171,6 +173,6 @@ public:
 };
 
 bool NetworkClipped(const CGameContext *pGameServer, int SnappingClient, vec2 CheckPos, int PlotID = -1, bool CheckShowAll = false, bool DefaultRange = false);
-bool NetworkClippedLine(const CGameContext *pGameServer, int SnappingClient, vec2 StartPos, vec2 EndPos, int PlotID = -1, bool CheckShowAll = false);
+bool NetworkClippedLine(const CGameContext *pGameServer, int SnappingClient, vec2 StartPos, vec2 EndPos, int PlotID = -1, bool CheckShowAll = false, bool DefaultRange = false);
 
 #endif
